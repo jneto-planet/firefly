@@ -5,6 +5,8 @@ import sys
 import json
 import subprocess
 import tkinter as tk
+import math
+import time
 from tkinter import messagebox, filedialog, ttk
 
 PACKAGE = "com.cccintegra.pax"
@@ -26,7 +28,7 @@ DEFAULT_SCRCPY_DIR = os.path.join(SCRIPT_DIR, "tools", "scrcpy")  # scrcpy.exe e
 ASSETS_TERMINALS_DIR = os.path.join(SCRIPT_DIR, "assets", "terminals")
 
 # App icon (place the generated files here)
-APP_ICONS_DIR = os.path.join(SCRIPT_DIR, "assets", "icons")
+SPLASH_IMAGE = os.path.join(SCRIPT_DIR, "assets", "splash.png")
 
 # Optional explicit overrides when filename doesn't match simple patterns
 MODEL_ICON_MAP = {
@@ -41,7 +43,6 @@ MODEL_ICON_MAP = {
 }
 
 LARGE_DEVICE_ICON_PX = 120   # big image below the selector
-SMALL_ICON_PX = 16           # small icon button size (already used)
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".3cxml_sender.json")
 
@@ -216,6 +217,61 @@ def load_icon_image(path: str, target_px: int = 16):
         return img.subsample(factor, factor)
     except Exception:
         return None
+    
+def _open_default(p: str):
+    if os.name == "nt":
+        os.startfile(p)  # default associated app
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", p])
+    else:
+        subprocess.Popen(["xdg-open", p])
+
+def _open_with_choice(p: str, parent=None):
+    """Open file with user-chosen app.
+       Windows: native 'Open with' dialog.
+       macOS/Linux: let user browse for an editor executable."""
+    if os.name == "nt":
+        # Native “Open with” dialog
+        subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", os.path.normpath(p)])
+        return
+
+    if sys.platform == "darwin":
+        # Ask user to choose an application (AppleScript)
+        osa = r'''
+        on run argv
+            set _f to POSIX file (item 1 of argv)
+            set pickedApp to choose application with title "Choose editor"
+            tell application "Finder" to open _f using pickedApp
+        end run
+        '''
+        try:
+            subprocess.Popen(["osascript", "-e", osa, p])
+            return
+        except Exception:
+            pass  # fall through to manual picker
+
+    # Linux / fallback: browse for an editor executable
+    try:
+        exe = filedialog.askopenfilename(
+            parent=parent,
+            title="Choose editor",
+            filetypes=[("Executables", "*"), ("All files", "*")],
+        )
+        if exe:
+            subprocess.Popen([exe, p])
+    except Exception as e:
+        messagebox.showerror("Open with…", str(e))
+
+def _reveal_in_file_manager(p: str):
+    if os.name == "nt":
+        # highlight the file in Explorer
+        subprocess.Popen(["explorer", "/select,", os.path.normpath(p)])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", p])
+    else:
+        # best-effort on Linux
+        folder = os.path.dirname(p) or "."
+        subprocess.Popen(["xdg-open", folder])
 
 def check_run_as(pkg):
     code, out, err = adb("shell", "run-as", pkg, "pwd")
@@ -242,7 +298,7 @@ def push_and_replace(local_path, pkg=PACKAGE):
         raise RuntimeError(f"adb push failed:\n{out}\n{err}")
 
     # 2) try run-as (debuggable builds)
-    ok, app_dir, _ = check_run_as(pkg)
+    ok, _ = check_run_as(pkg)
     if ok:
         target_dir = os.path.dirname(REL_TARGET)
         code, out, err = adb("shell", "run-as", pkg, "mkdir", "-p", target_dir)
@@ -293,6 +349,63 @@ def launch_scrcpy(serial, scrcpy_dir):
     except Exception as e:
         messagebox.showerror("Failed to launch scrcpy", str(e))
 
+def _load_splash_photo(master, path):
+    """Return a PhotoImage, scaling down to <=60% of screen.
+       Works with Pillow (preferred) or pure Tk fallback."""
+    # Preferred: Pillow resize (smooth + arbitrary scale)
+    try:
+        from PIL import Image, ImageTk
+        img = Image.open(path)
+
+        sw, sh = master.winfo_screenwidth(), master.winfo_screenheight()
+        max_w, max_h = int(sw * 0.6), int(sh * 0.6)
+        w, h = img.size
+        scale = min(1.0, max_w / w, max_h / h)  # scale down only
+        if scale < 1.0:
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        return ImageTk.PhotoImage(img)
+    except Exception:
+        # Fallback: pure Tk; use integer subsample to scale down
+        try:
+            img = tk.PhotoImage(file=path)
+            w, h = img.width(), img.height()
+            sw, sh = master.winfo_screenwidth(), master.winfo_screenheight()
+            max_w, max_h = int(sw * 0.6), int(sh * 0.6)
+            # factor = smallest integer that brings both dims <= max
+            factor = max(1, math.ceil(max(w / max_w, h / max_h)))
+            if factor > 1:
+                img = img.subsample(factor, factor)
+            return img
+        except Exception:
+            return None
+
+class Splash(tk.Toplevel):
+    def __init__(self, parent, image_path):
+        super().__init__(parent)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+
+        # optional: set the same window icon as the app
+        try:
+            icon_png = os.path.join(SCRIPT_DIR, "assets", "icons", "firefly.png")
+            if os.path.exists(icon_png):
+                self._ico_img = tk.PhotoImage(file=icon_png)
+                self.iconphoto(True, self._ico_img)
+        except Exception:
+            pass
+
+        self._photo = _load_splash_photo(parent, image_path)
+        self._lbl = ttk.Label(self, image=self._photo)
+        self._lbl.pack()
+
+        self.update_idletasks()
+        # center on screen
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.winfo_screenheight() // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
 # --- Small tooltip helper ---
 class Tooltip:
     def __init__(self, widget, text: str):
@@ -320,6 +433,56 @@ class Tooltip:
 
 class App(tk.Tk):
 
+    def _scrcpy_exists(self) -> bool:
+        return os.path.exists(scrcpy_exe_from_dir(self.scrcpy_dir_var.get()))
+
+    def copy_device_id(self):
+        text = self.device_id_var.get().strip()
+        if not text:
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.status.set("ADB ID copied")
+            self.after(1500, lambda: self.status.set("Ready"))
+        except Exception as e:
+            messagebox.showerror("Copy failed", str(e))
+
+    def _selected_file_path(self) -> str | None:
+        d = self.dir_var.get()
+        if not d or not os.path.isdir(d):
+            return None
+        sel = self.listbox.curselection()
+        if not sel:
+            return None
+        return os.path.join(d, self.listbox.get(sel[0]))
+
+    def _menu_open(self):
+        p = self._selected_file_path()
+        if p: _open_default(p)
+
+    def _menu_edit_with(self):
+        p = self._selected_file_path()
+        if p: _open_with_choice(p, parent=self)
+
+    def _menu_reveal(self):
+        p = self._selected_file_path()
+        if p: _reveal_in_file_manager(p)
+
+    def _on_list_rclick(self, event):
+        # Select the item under cursor before showing the menu
+        try:
+            idx = self.listbox.nearest(event.y)
+            self.listbox.selection_clear(0, tk.END)
+            self.listbox.selection_set(idx)
+            self.listbox.activate(idx)
+        except Exception:
+            pass
+        try:
+            self.list_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.list_menu.grab_release()
+
     def _on_list_select(self, event=None):
         self._update_send_button()
 
@@ -339,7 +502,7 @@ class App(tk.Tk):
     def _update_scrcpy_icon(self):
         """Enable or disable the 'Open Scrcpy' button depending on device availability."""
         serial = self._selected_serial()
-        if serial:
+        if serial and self._scrcpy_exists():
             self.scrcpy_icon_btn.state(["!disabled"])
         else:
             self.scrcpy_icon_btn.state(["disabled"])
@@ -379,8 +542,63 @@ class App(tk.Tk):
         # New: update the device info block, too
         self._update_device_info()
 
+    def _maybe_close_splash(self):
+        """Close splash if min time elapsed; otherwise schedule later.
+        Also shows & centers main window when splash is gone."""
+        # If there's no splash, just show the app immediately
+        if not getattr(self, "splash", None):
+            self.deiconify()
+            self.lift()
+            # center main window
+            self.update_idletasks()
+            w = self.winfo_width()
+            h = self.winfo_height()
+            x = (self.winfo_screenwidth() // 2) - (w // 2)
+            y = (self.winfo_screenheight() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+            return
+
+        # There is a splash: enforce minimum duration
+        elapsed_ms = int((time.monotonic() - (self._splash_start or time.monotonic())) * 1000)
+        remaining = self._splash_min_ms - elapsed_ms
+        if remaining <= 0:
+            try:
+                self.splash.destroy()
+            except Exception:
+                pass
+            self.splash = None
+            # show & center the app window now
+            self.deiconify()
+            self.lift()
+            self.update_idletasks()
+            w = self.winfo_width()
+            h = self.winfo_height()
+            x = (self.winfo_screenwidth() // 2) - (w // 2)
+            y = (self.winfo_screenheight() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        else:
+            # Try again after the remaining time
+            self.after(remaining, self._maybe_close_splash)
+
+    def _finish_startup(self):
+        try:
+            check_adb()
+            self.refresh_devices()
+            self._update_scrcpy_icon()
+            self._update_device_info()
+        except Exception as e:
+            messagebox.showerror("ADB error", str(e))
+        
+        self.populate_files()
+        self._update_send_button()
+
+        self._maybe_close_splash()
+
     def __init__(self):
         super().__init__()
+
+        # Hide the main window until we finish loading
+        self.withdraw()
 
         self.title("Firefly")
 
@@ -456,7 +674,35 @@ class App(tk.Tk):
         self.device_id_var = tk.StringVar(value="")
 
         ttk.Label(right, textvariable=self.device_title_var, font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
-        ttk.Label(right, textvariable=self.device_id_var, foreground="#555").pack(anchor="w")
+
+        # ADB ID row: label + small copy button
+        id_row = ttk.Frame(right)
+        id_row.pack(anchor="w", pady=(2, 0))
+
+        self.device_id_label = ttk.Label(id_row, textvariable=self.device_id_var, foreground="#555")
+        self.device_id_label.pack(side=tk.LEFT)
+
+        # Clickable clipboard icon (no button chrome)
+        self.copy_id_icon = tk.Label(id_row, text="📋", cursor="hand2", padx=0)
+        self.copy_id_icon.pack(side=tk.LEFT, padx=(6, 0))
+        Tooltip(self.copy_id_icon, "Copy ADB ID")
+
+        # Click to copy
+        self.copy_id_icon.bind("<Button-1>", lambda _e: self.copy_device_id())
+
+        # Optional: subtle hover feedback
+        def _hover_in(_e):  # darker on hover
+            try: self.copy_id_icon.config(fg="#222")
+            except: pass
+        def _hover_out(_e): # back to default
+            try: self.copy_id_icon.config(fg="")
+            except: pass
+        self.copy_id_icon.bind("<Enter>", _hover_in)
+        self.copy_id_icon.bind("<Leave>", _hover_out)
+
+
+        # Bonus: double-click the ID label to copy
+        self.device_id_label.bind("<Double-1>", lambda _e: self.copy_device_id())
 
         self.scrcpy_icon_btn = ttk.Button(right, text="Open Scrcpy", command=self.open_scrcpy_manual)
         self.scrcpy_icon_btn.pack(anchor="w", pady=(6, 0))
@@ -488,6 +734,17 @@ class App(tk.Tk):
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.bind("<<ListboxSelect>>", self._on_list_select)
 
+        # Context menu for the list
+        self.list_menu = tk.Menu(self, tearoff=0)
+        self.list_menu.add_command(label="Open", command=self._menu_open)              # default app
+        self.list_menu.add_command(label="Edit with…", command=self._menu_edit_with)   # choose app
+        self.list_menu.add_separator()
+        self.list_menu.add_command(label="Show in Explorer", command=self._menu_reveal)
+
+        # Right-click bindings (Windows/Linux = Button-3, macOS often Button-2 as well)
+        self.listbox.bind("<Button-2>", self._on_list_rclick)  # helps on some mac configs
+        self.listbox.bind("<Button-3>", self._on_list_rclick)
+
         # bottom buttons
         bottom = ttk.Frame(self, padding=10)
         bottom.pack(side=tk.BOTTOM, fill=tk.X)
@@ -500,15 +757,19 @@ class App(tk.Tk):
         ttk.Label(self, textvariable=self.status, padding=(10,0,10,10)).pack(fill=tk.X)
 
         # init
-        try:
-            check_adb()
-            self.refresh_devices()
-            self._update_scrcpy_icon()
-            self._update_device_info()
-        except Exception as e:
-            messagebox.showerror("ADB error", str(e))
-        self.populate_files()
-        self._update_send_button()
+
+        # Show splash (it will scale down automatically)
+        if os.path.exists(SPLASH_IMAGE):
+            self.splash = Splash(self, SPLASH_IMAGE)
+            self._splash_min_ms = 2000   # <- 2 seconds
+            self._splash_start = time.monotonic()
+        else:
+            self.splash = None  # still works without an image
+            self._splash_min_ms = 0
+            self._splash_start = None
+
+        # Finish heavy startup after the splash is visible
+        self.after(50, self._finish_startup)
 
     def open_settings(self):
         """Settings dialog for 3cxml dir, scrcpy dir, and auto-open option."""
