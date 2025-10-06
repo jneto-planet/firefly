@@ -298,7 +298,7 @@ def push_and_replace(local_path, pkg=PACKAGE):
         raise RuntimeError(f"adb push failed:\n{out}\n{err}")
 
     # 2) try run-as (debuggable builds)
-    ok, _ = check_run_as(pkg)
+    ok, _cwd, _err = check_run_as(pkg)   # <— was: ok, _ = check_run_as(pkg)
     if ok:
         target_dir = os.path.dirname(REL_TARGET)
         code, out, err = adb("shell", "run-as", pkg, "mkdir", "-p", target_dir)
@@ -432,6 +432,29 @@ class Tooltip:
             self.tip = None
 
 class App(tk.Tk):
+
+    def _center_toplevel(self, win, rel_to=None):
+        """Center a Toplevel over rel_to (defaults to self), clamped to screen."""
+        rel = rel_to or self
+        win.update_idletasks()  # ensure geometry is calculated
+
+        tw, th = win.winfo_width(), win.winfo_height()
+        rw, rh = rel.winfo_width(), rel.winfo_height()
+        rx, ry = rel.winfo_rootx(), rel.winfo_rooty()
+
+        x = rx + (rw - tw) // 2
+        y = ry + (rh - th) // 2
+
+        # keep fully on-screen
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x = max(0, min(x, sw - tw))
+        y = max(0, min(y, sh - th))
+
+        win.geometry(f"{tw}x{th}+{x}+{y}")
+
+    def _persist(self, key, value):
+        self.config_data[key] = value
+        save_config(self.config_data)
 
     def _scrcpy_exists(self) -> bool:
         return os.path.exists(scrcpy_exe_from_dir(self.scrcpy_dir_var.get()))
@@ -628,6 +651,8 @@ class App(tk.Tk):
         self.open_scrcpy_var = tk.BooleanVar(value=bool(self.config_data.get("auto_open_scrcpy", False)))
         self.display_mode_var = tk.StringVar(value=self.config_data.get("device_display_mode", DEFAULT_DISPLAY_MODE))
 
+        self.open_scrcpy_var.trace_add("write", lambda *_: self._persist("auto_open_scrcpy", bool(self.open_scrcpy_var.get())))
+
         # --- Device row + Settings (same row) ---
         devrow = ttk.Frame(self, padding=(10,0,10,10))
         devrow.pack(fill=tk.X)
@@ -752,6 +777,9 @@ class App(tk.Tk):
         self.send_btn = ttk.Button(bottom, text="Send to terminal", command=self.send_selected, state="disabled")
         self.send_btn.pack(side=tk.LEFT)
 
+        self.open_scrcpy_chk = ttk.Checkbutton(bottom, text="Open scrcpy after send", variable=self.open_scrcpy_var)
+        self.open_scrcpy_chk.pack(side=tk.LEFT, padx=(12, 0))
+
         # status
         self.status = tk.StringVar(value="Ready")
         ttk.Label(self, textvariable=self.status, padding=(10,0,10,10)).pack(fill=tk.X)
@@ -802,10 +830,6 @@ class App(tk.Tk):
                 self.scrcpy_dir_var.set(d)
         ttk.Button(frm, text="Browse…", command=browse_scrcpy_dir).grid(row=3, column=1, padx=(6,0), sticky="e")
 
-        # auto-open scrcpy checkbox
-        auto_chk = ttk.Checkbutton(frm, text="Open scrcpy automatically after send", variable=self.open_scrcpy_var)
-        auto_chk.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
         # Device display format
         ttk.Label(frm, text="Device display format:").grid(row=5, column=0, sticky="w", pady=(8,0))
         fmt_combo = ttk.Combobox(
@@ -825,7 +849,6 @@ class App(tk.Tk):
             # Persist config
             self.config_data["dir_3cxml"] = self.dir_var.get().strip() or DEFAULT_3CXML_DIR
             self.config_data["scrcpy_dir"] = self.scrcpy_dir_var.get().strip() or DEFAULT_SCRCPY_DIR
-            self.config_data["auto_open_scrcpy"] = bool(self.open_scrcpy_var.get())
             self.config_data["device_display_mode"] = self.display_mode_var.get()
 
             save_config(self.config_data)
@@ -839,6 +862,9 @@ class App(tk.Tk):
 
         frm.columnconfigure(0, weight=1)
         dir_entry.focus_set()
+
+        # Center the dialog over the main window
+        win.after(0, lambda: self._center_toplevel(win))
 
     def refresh_devices(self):
         try:
