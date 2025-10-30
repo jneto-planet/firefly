@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices, testAdb } from "./adb";
+import { adb, adbs, parseDevices, testAdb, testScrcpy } from "./adb";
 
 export function registerFireflyIpc() {
   // --- Config ---
@@ -243,7 +243,23 @@ export function registerFireflyIpc() {
       };
     } catch (error) {
       console.error('[updater] Failed to check for updates:', error);
-      throw new Error(`Update check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Provide more helpful error messages
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        
+        // Check for common issues
+        if (errorMessage.includes('404')) {
+          errorMessage = 'Repository not found or not accessible. The repository may be private or the URL may be incorrect.';
+        } else if (errorMessage.includes('network')) {
+          errorMessage = 'Network error occurred while checking for updates. Please check your internet connection.';
+        } else if (errorMessage.includes('authentication')) {
+          errorMessage = 'Authentication failed. The repository may be private.';
+        }
+      }
+      
+      throw new Error(`Update check failed: ${errorMessage}`);
     }
   });
 
@@ -260,5 +276,10 @@ export function registerFireflyIpc() {
   // --- ADB Diagnostics ---
   ipcMain.handle("firefly:test-adb", async () => {
     return await testAdb();
+  });
+
+  // --- Scrcpy Diagnostics ---
+  ipcMain.handle("firefly:test-scrcpy", async (_e, scrcpyPath: string) => {
+    return await testScrcpy(scrcpyPath);
   });
 }

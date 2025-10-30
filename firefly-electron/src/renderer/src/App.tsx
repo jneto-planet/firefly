@@ -29,6 +29,7 @@ declare global {
       getAppVersion: () => Promise<string>;
       installUpdate: () => Promise<void>;
       testAdb: () => Promise<{ working: boolean; path: string; error?: string }>;
+      testScrcpy: (scrcpyPath: string) => Promise<{ working: boolean; path: string; error?: string }>;
     };
   }
 }
@@ -314,30 +315,32 @@ export default function App() {
   }
 
   function SettingsDialog() {
-    const [tmpDir, setTmpDir] = React.useState(dir3cxml);
-    const [tmpScrcpy, setTmpScrcpy] = React.useState(scrcpyDir);
-    const [tmpAuto, setTmpAuto] = React.useState<boolean>(autoOpenScrcpy);
-    
-    // Version and update state
-    const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
-    const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
-    const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
-    const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
-    
-    // ADB diagnostics state
-    const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
-    const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
+  const [tmpDir, setTmpDir] = React.useState(dir3cxml);
+  const [tmpScrcpy, setTmpScrcpy] = React.useState(scrcpyDir);
+  // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page
+
+  // Version and update state
+  const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
+  const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
+  const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
+  const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
+
+  // ADB diagnostics state
+  const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
+  const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
+  // scrcpy diagnostics state
+  const [scrcpyStatus, setScrcpyStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
+  const [testingScrcpy, setTestingScrcpy] = React.useState<boolean>(false);
 
     // keep fields in sync if settings reopen
     React.useEffect(() => {
       if (!showSettings) return;
       setTmpDir(dir3cxml);
       setTmpScrcpy(scrcpyDir);
-      setTmpAuto(autoOpenScrcpy);
-      
-      // Load current version and ADB status
+      // Load current version and ADB/scrcpy status
       loadCurrentVersion();
       testAdbStatus();
+      testScrcpyStatus();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showSettings]);
 
@@ -391,18 +394,34 @@ export default function App() {
       try {
         await window.firefly.setConfig({
           dir_3cxml: tmpDir || dir3cxml,
-          scrcpy_dir: tmpScrcpy || scrcpyDir,
-          auto_open_scrcpy: tmpAuto
+          scrcpy_dir: tmpScrcpy || scrcpyDir
         });
         setDir3cxml(tmpDir || dir3cxml);
         setScrcpyDir(tmpScrcpy || scrcpyDir);
-        setAutoOpenScrcpy(tmpAuto);
         setShowSettings(false);
         await refreshDevices();
         await refreshXml();
       } catch (e) {
         console.error("save settings failed:", e);
         alert("Failed to save settings");
+      }
+    }
+    async function testScrcpyStatus() {
+      setTestingScrcpy(true);
+      try {
+        // Try to run scrcpy --version at the given path
+        const pathToScrcpy = tmpScrcpy || scrcpyDir;
+        if (!pathToScrcpy) {
+          setScrcpyStatus({ working: false, path: '', error: 'No path set' });
+          return;
+        }
+        // Test scrcpy at the given path
+        const result = await window.firefly.testScrcpy(pathToScrcpy);
+        setScrcpyStatus(result);
+      } catch (e) {
+        setScrcpyStatus({ working: false, path: tmpScrcpy || scrcpyDir, error: `Test failed: ${e}` });
+      } finally {
+        setTestingScrcpy(false);
       }
     }
     async function browse3c() {
@@ -416,6 +435,16 @@ export default function App() {
         const d = await window.firefly.pickDirectory(tmpScrcpy || scrcpyDir);
         if (d) setTmpScrcpy(d);
       } catch (e) { console.error("pickDirectory scrcpy failed:", e); }
+    }
+    async function browseAdb() {
+      try {
+        const d = await window.firefly.pickDirectory();
+        if (d) {
+          // User can set a custom ADB directory - this would need to be stored in config
+          // For now, we'll just test it directly
+          await testAdbStatus();
+        }
+      } catch (e) { console.error("pickDirectory adb failed:", e); }
     }
 
     if (!showSettings) return null;
@@ -434,7 +463,7 @@ export default function App() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-white mb-2">3cxml Templates Folder</label>
+              <label className="block text-sm font-medium text-white mb-2">3cxml Folder</label>
               <div className="flex gap-2">
                 <input
                   value={tmpDir}
@@ -454,7 +483,7 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white mb-2">Scrcpy Executable Path</label>
+              <label className="block text-sm font-medium text-white mb-2">Scrcpy path</label>
               <div className="flex gap-2">
                 <input
                   value={tmpScrcpy}
@@ -468,20 +497,9 @@ export default function App() {
                   className="px-3 py-2 rounded-lg border text-sm"
                   style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                 >
-                  Browse
+                  Choose...
                 </button>
               </div>
-            </div>
-
-            <div>
-              <label className="flex items-center gap-2 text-sm text-white">
-                <input
-                  type="checkbox"
-                  checked={tmpAuto}
-                  onChange={e => setTmpAuto(e.target.checked)}
-                />
-                Auto-open scrcpy after sending templates
-              </label>
             </div>
 
             <div className="border-t pt-4" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
@@ -490,8 +508,9 @@ export default function App() {
                   <div className="text-sm font-medium text-white">ADB Status</div>
                   {adbStatus ? (
                     <>
-                      <div className={`text-xs ${adbStatus.working ? 'text-green-400' : 'text-red-400'}`}>
-                        {adbStatus.working ? '✅ ADB Working' : '❌ ADB Not Working'}
+                      <div className={`text-xs ${adbStatus.working ? 'text-green-400' : 'text-red-400'}`}
+                        style={{ fontWeight: 500 }}>
+                        {adbStatus.working ? <span>ADB found</span> : <span>ADB not found</span>}
                       </div>
                       <div className="text-xs text-white/40">Path: {adbStatus.path}</div>
                       {adbStatus.error && (
@@ -502,18 +521,68 @@ export default function App() {
                     <div className="text-xs text-white/60">Testing...</div>
                   )}
                 </div>
-                <button
-                  onClick={testAdbStatus}
-                  disabled={testingAdb}
-                  className="px-3 py-1 text-xs rounded border"
-                  style={{ 
-                    borderColor: "rgba(255,255,255,0.12)", 
-                    color: "#fff",
-                    opacity: testingAdb ? 0.5 : 1
-                  }}
-                >
-                  {testingAdb ? "Testing..." : "Test ADB"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={testAdbStatus}
+                    disabled={testingAdb}
+                    className="px-3 py-1 text-xs rounded border"
+                    style={{ 
+                      borderColor: "rgba(255,255,255,0.12)", 
+                      color: "#fff",
+                      opacity: testingAdb ? 0.5 : 1
+                    }}
+                  >
+                    {testingAdb ? "Testing..." : "Test ADB"}
+                  </button>
+                  <button
+                    onClick={browseAdb}
+                    className="px-3 py-1 text-xs rounded border"
+                    style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
+                  >
+                    Choose...
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">Scrcpy Status</div>
+                  {scrcpyStatus ? (
+                    <>
+                      <div className={`text-xs ${scrcpyStatus.working ? 'text-green-400' : 'text-red-400'}`}
+                        style={{ fontWeight: 500 }}>
+                        {scrcpyStatus.working ? <span>Scrcpy found</span> : <span>Scrcpy not found</span>}
+                      </div>
+                      <div className="text-xs text-white/40">Path: {scrcpyStatus.path}</div>
+                      {scrcpyStatus.error && (
+                        <div className="text-xs text-red-400 mt-1">{scrcpyStatus.error}</div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-xs text-white/60">Testing...</div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={testScrcpyStatus}
+                    disabled={testingScrcpy}
+                    className="px-3 py-1 text-xs rounded border"
+                    style={{ 
+                      borderColor: "rgba(255,255,255,0.12)", 
+                      color: "#fff",
+                      opacity: testingScrcpy ? 0.5 : 1
+                    }}
+                  >
+                    {testingScrcpy ? "Testing..." : "Test Scrcpy"}
+                  </button>
+                  <button
+                    onClick={browseScrcpy}
+                    className="px-3 py-1 text-xs rounded border"
+                    style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
+                  >
+                    Choose...
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center justify-between mb-2">

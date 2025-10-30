@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld("firefly", {
     
     // ADB Diagnostics
     testAdb: () => ipcRenderer.invoke("firefly:test-adb"),
+    
+    // Scrcpy Diagnostics
+    testScrcpy: (scrcpyPath: string) => ipcRenderer.invoke("firefly:test-scrcpy", scrcpyPath),
 });
 
 contextBridge.exposeInMainWorld("electron", {

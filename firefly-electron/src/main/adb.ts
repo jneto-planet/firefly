@@ -113,6 +113,27 @@ export async function testAdb(): Promise<{ working: boolean; path: string; error
   }
 }
 
+// Test if Scrcpy is working
+export async function testScrcpy(scrcpyPath: string): Promise<{ working: boolean; path: string; error?: string }> {
+  if (!scrcpyPath) {
+    return { working: false, path: '', error: 'No scrcpy path provided' };
+  }
+
+  try {
+    const result = await runAsync(scrcpyPath, ["--version"], { timeoutMs: 10000 });
+    if (result.code === 0) {
+      console.log(`[scrcpy] Scrcpy is working: ${result.out.split('\n')[0]}`);
+      return { working: true, path: scrcpyPath };
+    } else {
+      console.error(`[scrcpy] Scrcpy version check failed: ${result.err}`);
+      return { working: false, path: scrcpyPath, error: result.err || `Exit code: ${result.code}` };
+    }
+  } catch (error) {
+    console.error(`[scrcpy] Scrcpy test failed:`, error);
+    return { working: false, path: scrcpyPath, error: `Error: ${error}` };
+  }
+}
+
 export function parseDevices(out: string) {
   const lines = out.split("\n").slice(1).map(s => s.trim()).filter(Boolean);
   return lines.map((l) => {
