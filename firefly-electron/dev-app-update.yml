@@ -1,0 +1,4 @@
+provider: github
+owner: jneto-planet
+repo: firefly
+updaterCacheDirName: firefly-updater
