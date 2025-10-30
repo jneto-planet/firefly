@@ -25,9 +25,10 @@ declare global {
       windowMaximize: () => Promise<void>;
       windowClose: () => Promise<void>;
       windowIsMaximized: () => Promise<boolean>;
-      checkForUpdates: () => Promise<{ available: boolean; version: string | null }>;
+      checkForUpdates: () => Promise<{ available: boolean; version: string | null; message?: string }>;
       getAppVersion: () => Promise<string>;
       installUpdate: () => Promise<void>;
+      testAdb: () => Promise<{ working: boolean; path: string; error?: string }>;
     };
   }
 }
@@ -322,6 +323,10 @@ export default function App() {
     const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
     const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
     const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
+    
+    // ADB diagnostics state
+    const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
+    const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
 
     // keep fields in sync if settings reopen
     React.useEffect(() => {
@@ -330,8 +335,9 @@ export default function App() {
       setTmpScrcpy(scrcpyDir);
       setTmpAuto(autoOpenScrcpy);
       
-      // Load current version
+      // Load current version and ADB status
       loadCurrentVersion();
+      testAdbStatus();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showSettings]);
 
@@ -352,13 +358,32 @@ export default function App() {
         setUpdateVersion(result.version);
         
         if (!result.available) {
-          alert("You're running the latest version!");
+          if ((result as any).message) {
+            // Development mode
+            alert((result as any).message);
+          } else {
+            // Production mode - no updates available
+            alert("You're running the latest version!");
+          }
         }
       } catch (e) {
         console.error("Failed to check for updates:", e);
-        alert("Failed to check for updates. Please try again later.");
+        alert(`Failed to check for updates: ${e instanceof Error ? e.message : 'Unknown error'}`);
       } finally {
         setCheckingForUpdates(false);
+      }
+    }
+
+    async function testAdbStatus() {
+      setTestingAdb(true);
+      try {
+        const result = await window.firefly.testAdb();
+        setAdbStatus(result);
+      } catch (e) {
+        console.error("Failed to test ADB:", e);
+        setAdbStatus({ working: false, path: "unknown", error: `Test failed: ${e}` });
+      } finally {
+        setTestingAdb(false);
       }
     }
 
@@ -460,6 +485,37 @@ export default function App() {
             </div>
 
             <div className="border-t pt-4" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">ADB Status</div>
+                  {adbStatus ? (
+                    <>
+                      <div className={`text-xs ${adbStatus.working ? 'text-green-400' : 'text-red-400'}`}>
+                        {adbStatus.working ? '✅ ADB Working' : '❌ ADB Not Working'}
+                      </div>
+                      <div className="text-xs text-white/40">Path: {adbStatus.path}</div>
+                      {adbStatus.error && (
+                        <div className="text-xs text-red-400 mt-1">{adbStatus.error}</div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-xs text-white/60">Testing...</div>
+                  )}
+                </div>
+                <button
+                  onClick={testAdbStatus}
+                  disabled={testingAdb}
+                  className="px-3 py-1 text-xs rounded border"
+                  style={{ 
+                    borderColor: "rgba(255,255,255,0.12)", 
+                    color: "#fff",
+                    opacity: testingAdb ? 0.5 : 1
+                  }}
+                >
+                  {testingAdb ? "Testing..." : "Test ADB"}
+                </button>
+              </div>
+
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <div className="text-sm font-medium text-white">App Version</div>

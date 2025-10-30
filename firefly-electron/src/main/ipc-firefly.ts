@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices } from "./adb";
+import { adb, adbs, parseDevices, testAdb } from "./adb";
 
 export function registerFireflyIpc() {
   // --- Config ---
@@ -80,9 +80,19 @@ export function registerFireflyIpc() {
   // --- Devices ---
   ipcMain.handle("firefly:list-devices", async () => {
     console.log(`[firefly] Listing devices...`);
+    
+    // First test if ADB is working
+    const adbTest = await testAdb();
+    if (!adbTest.working) {
+      console.error(`[firefly] ADB not working:`, adbTest);
+      throw new Error(`ADB is not working. Path: ${adbTest.path}. Error: ${adbTest.error || 'Unknown error'}. Please install Android SDK platform-tools or check ADB installation.`);
+    }
+    
     const { code, out, err } = await adb("devices", "-l");
     console.log(`[firefly] Devices result: code=${code}, out="${out}", err="${err}"`);
-    if (code !== 0) throw new Error(`ADB devices command failed: ${err || "Unknown error"}`);
+    if (code !== 0) {
+      throw new Error(`ADB devices command failed: ${err || "Unknown error"}. Make sure USB debugging is enabled on your Android device.`);
+    }
     const devices = parseDevices(out);
     console.log(`[firefly] Parsed ${devices.length} devices:`, devices);
     return devices;
@@ -214,14 +224,27 @@ export function registerFireflyIpc() {
 
   // --- Auto-Updater ---
   ipcMain.handle("firefly:check-for-updates", async () => {
-    if (app.isPackaged) {
+    if (!app.isPackaged) {
+      console.log('[updater] Check for updates called in development mode');
+      return { 
+        available: false, 
+        version: null, 
+        message: "Update checking is only available in production builds" 
+      };
+    }
+
+    try {
+      console.log('[updater] Checking for updates...');
       const result = await autoUpdater.checkForUpdates();
+      console.log('[updater] Check result:', result);
       return {
         available: !!result?.updateInfo,
         version: result?.updateInfo?.version || null
       };
+    } catch (error) {
+      console.error('[updater] Failed to check for updates:', error);
+      throw new Error(`Update check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-    return { available: false, version: null };
   });
 
   ipcMain.handle("firefly:get-app-version", async () => {
@@ -232,5 +255,10 @@ export function registerFireflyIpc() {
     if (app.isPackaged) {
       autoUpdater.quitAndInstall();
     }
+  });
+
+  // --- ADB Diagnostics ---
+  ipcMain.handle("firefly:test-adb", async () => {
+    return await testAdb();
   });
 }

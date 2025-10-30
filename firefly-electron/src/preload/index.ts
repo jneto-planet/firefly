@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld("firefly", {
     checkForUpdates: () => ipcRenderer.invoke("firefly:check-for-updates"),
     getAppVersion: () => ipcRenderer.invoke("firefly:get-app-version"),
     installUpdate: () => ipcRenderer.invoke("firefly:install-update"),
+    
+    // ADB Diagnostics
+    testAdb: () => ipcRenderer.invoke("firefly:test-adb"),
 });
 
 contextBridge.exposeInMainWorld("electron", {
