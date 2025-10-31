@@ -82,6 +82,18 @@ export default function App() {
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
 
+  // ADB and Scrcpy diagnostics state
+  const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
+  const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
+  const [scrcpyStatus, setScrcpyStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
+  const [testingScrcpy, setTestingScrcpy] = React.useState<boolean>(false);
+
+  // Version and update state
+  const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
+  const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
+  const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
+  const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
+
   // Splash screen
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
 
@@ -115,6 +127,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDir]);
 
+  // Initialize settings status when modal opens
+  React.useEffect(() => {
+    if (showSettings) {
+      initializeSettingsStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings]);
+
   async function boot() {
     try {
       const cfg = await window.firefly.getConfig();
@@ -126,6 +146,32 @@ export default function App() {
     }
     
     await refreshDevices();
+  }
+
+  async function initializeSettingsStatus() {
+    try {
+      const cfg = await window.firefly.getConfig();
+      
+      // Initialize scrcpy status
+      if (cfg?.custom_scrcpy_path) {
+        console.log("Loading saved scrcpy path:", cfg.custom_scrcpy_path);
+        const result = await window.firefly.testScrcpy(cfg.custom_scrcpy_path);
+        setScrcpyStatus(result);
+      } else {
+        // Try auto-detection
+        try {
+          const autoDetected = await window.firefly.detectScrcpy();
+          console.log("Auto-detected scrcpy:", autoDetected);
+          setScrcpyStatus(autoDetected);
+        } catch (e) {
+          console.error("Scrcpy auto-detection failed:", e);
+          setScrcpyStatus({ working: false, path: '', error: 'Auto-detection failed' });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to initialize settings status:", e);
+      setScrcpyStatus({ working: false, path: '', error: 'Failed to load config' });
+    }
   }
 
   const handleLoadingComplete = () => {
@@ -319,18 +365,9 @@ export default function App() {
   function SettingsDialog() {
     const [tmpDir, setTmpDir] = React.useState(dir3cxml);
     // Remove tmpScrcpy - we now use custom path choosers
-    // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page  // Version and update state
-  const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
-  const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
-  const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
-  const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
+    // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page
 
-  // ADB diagnostics state
-  const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
-  const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
-  // scrcpy diagnostics state
-  const [scrcpyStatus, setScrcpyStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
-  const [testingScrcpy, setTestingScrcpy] = React.useState<boolean>(false);
+
 
     // keep fields in sync if settings reopen
     React.useEffect(() => {
@@ -473,6 +510,8 @@ export default function App() {
         setScrcpyStatus({ working: false, path, error: `Test failed: ${e}` });
       }
     }
+
+
 
     if (!showSettings) return null;
     return (
