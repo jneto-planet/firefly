@@ -127,13 +127,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDir]);
 
-  // Initialize settings status when modal opens
-  React.useEffect(() => {
-    if (showSettings) {
-      initializeSettingsStatus();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSettings]);
+
 
   async function boot() {
     try {
@@ -141,6 +135,22 @@ export default function App() {
       if (!isMounted.current) return;
       setDir3cxml(cfg?.dir_3cxml || "");
       setAutoOpenScrcpy(!!cfg?.auto_open_scrcpy);
+      
+      // Initialize ADB and Scrcpy status from environment detection only
+      // If found in environment, show the path; if not found, show empty state
+      try {
+        const adbResult = await window.firefly.testAdb();
+        setAdbStatus(adbResult);
+      } catch (e) {
+        setAdbStatus({ working: false, path: '', error: 'Not found in environment' });
+      }
+      
+      try {
+        const scrcpyResult = await window.firefly.detectScrcpy();
+        setScrcpyStatus(scrcpyResult);
+      } catch (e) {
+        setScrcpyStatus({ working: false, path: '', error: 'Not found in environment' });
+      }
     } catch (e) {
       console.error("getConfig failed:", e);
     }
@@ -148,31 +158,7 @@ export default function App() {
     await refreshDevices();
   }
 
-  async function initializeSettingsStatus() {
-    try {
-      const cfg = await window.firefly.getConfig();
-      
-      // Initialize scrcpy status
-      if (cfg?.custom_scrcpy_path) {
-        console.log("Loading saved scrcpy path:", cfg.custom_scrcpy_path);
-        const result = await window.firefly.testScrcpy(cfg.custom_scrcpy_path);
-        setScrcpyStatus(result);
-      } else {
-        // Try auto-detection
-        try {
-          const autoDetected = await window.firefly.detectScrcpy();
-          console.log("Auto-detected scrcpy:", autoDetected);
-          setScrcpyStatus(autoDetected);
-        } catch (e) {
-          console.error("Scrcpy auto-detection failed:", e);
-          setScrcpyStatus({ working: false, path: '', error: 'Auto-detection failed' });
-        }
-      }
-    } catch (e) {
-      console.error("Failed to initialize settings status:", e);
-      setScrcpyStatus({ working: false, path: '', error: 'Failed to load config' });
-    }
-  }
+
 
   const handleLoadingComplete = () => {
     if (isMounted.current) {
@@ -373,10 +359,8 @@ export default function App() {
     React.useEffect(() => {
       if (!showSettings) return;
       setTmpDir(dir3cxml);
-      // Load current version and ADB/scrcpy status
+      // Load current version only
       loadCurrentVersion();
-      testAdbStatus();
-      testScrcpyStatus();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showSettings]);
 
@@ -414,13 +398,17 @@ export default function App() {
     }
 
     async function testAdbStatus() {
+      if (!adbStatus?.path) return; // Don't test if no path selected
+      
       setTestingAdb(true);
       try {
+        // First set the custom path, then test
+        await window.firefly.setCustomAdbPath(adbStatus.path);
         const result = await window.firefly.testAdb();
         setAdbStatus(result);
       } catch (e) {
         console.error("Failed to test ADB:", e);
-        setAdbStatus({ working: false, path: "unknown", error: `Test failed: ${e}` });
+        setAdbStatus({ working: false, path: adbStatus.path, error: `Test failed: ${e}` });
       } finally {
         setTestingAdb(false);
       }
@@ -428,9 +416,22 @@ export default function App() {
 
     async function save() {
       try {
-        await window.firefly.setConfig({
+        const configUpdates: any = {
           dir_3cxml: tmpDir || dir3cxml
-        });
+        };
+        
+        // Only save ADB/Scrcpy paths if they have been tested and are working
+        if (adbStatus?.path && adbStatus.working) {
+          await window.firefly.setCustomAdbPath(adbStatus.path);
+          configUpdates.custom_adb_path = adbStatus.path;
+        }
+        
+        if (scrcpyStatus?.path && scrcpyStatus.working) {
+          await window.firefly.setCustomScrcpyPath(scrcpyStatus.path);
+          configUpdates.custom_scrcpy_path = scrcpyStatus.path;
+        }
+        
+        await window.firefly.setConfig(configUpdates);
         setDir3cxml(tmpDir || dir3cxml);
         setShowSettings(false);
         await refreshDevices();
@@ -441,19 +442,14 @@ export default function App() {
       }
     }
     async function testScrcpyStatus() {
+      if (!scrcpyStatus?.path) return; // Don't test if no path selected
+      
       setTestingScrcpy(true);
       try {
-        // If we have a current path, test it; otherwise try auto-detection
-        if (scrcpyStatus?.path) {
-          const result = await window.firefly.testScrcpy(scrcpyStatus.path);
-          setScrcpyStatus(result);
-        } else {
-          // Try auto-detection first
-          const result = await window.firefly.detectScrcpy();
-          setScrcpyStatus(result);
-        }
+        const result = await window.firefly.testScrcpy(scrcpyStatus.path);
+        setScrcpyStatus(result);
       } catch (e) {
-        setScrcpyStatus({ working: false, path: scrcpyStatus?.path || '', error: `Test failed: ${e}` });
+        setScrcpyStatus({ working: false, path: scrcpyStatus.path, error: `Test failed: ${e}` });
       } finally {
         setTestingScrcpy(false);
       }
@@ -473,9 +469,8 @@ export default function App() {
         });
         console.log("File picker result:", file);
         if (file) {
-          await window.firefly.setCustomScrcpyPath(file);
-          setScrcpyStatus({ working: false, path: file, error: 'Testing...' });
-          await testScrcpyWithPath(file);
+          // Only set the path, don't save or test automatically
+          setScrcpyStatus({ working: false, path: file, error: 'Ready to test' });
         }
       } catch (e) { 
         console.error("pickFile scrcpy failed:", e);
@@ -492,9 +487,8 @@ export default function App() {
         });
         console.log("File picker result:", file);
         if (file) {
-          await window.firefly.setCustomAdbPath(file);
-          setAdbStatus({ working: false, path: file, error: 'Testing...' });
-          await testAdbStatus();
+          // Only set the path, don't save or test automatically
+          setAdbStatus({ working: false, path: file, error: 'Ready to test' });
         }
       } catch (e) { 
         console.error("pickFile adb failed:", e);
@@ -502,14 +496,7 @@ export default function App() {
       }
     }
     
-    async function testScrcpyWithPath(path: string) {
-      try {
-        const result = await window.firefly.testScrcpy(path);
-        setScrcpyStatus(result);
-      } catch (e) {
-        setScrcpyStatus({ working: false, path, error: `Test failed: ${e}` });
-      }
-    }
+
 
 
 
@@ -572,12 +559,12 @@ export default function App() {
                 <div className="flex gap-2">
                   <button
                     onClick={testAdbStatus}
-                    disabled={testingAdb}
+                    disabled={testingAdb || !adbStatus?.path}
                     className="px-3 py-1 text-xs rounded border"
                     style={{ 
                       borderColor: "rgba(255,255,255,0.12)", 
                       color: "#fff",
-                      opacity: testingAdb ? 0.5 : 1
+                      opacity: (testingAdb || !adbStatus?.path) ? 0.5 : 1
                     }}
                   >
                     {testingAdb ? "Testing..." : "Test ADB"}
@@ -613,12 +600,12 @@ export default function App() {
                 <div className="flex gap-2">
                   <button
                     onClick={testScrcpyStatus}
-                    disabled={testingScrcpy}
+                    disabled={testingScrcpy || !scrcpyStatus?.path}
                     className="px-3 py-1 text-xs rounded border"
                     style={{ 
                       borderColor: "rgba(255,255,255,0.12)", 
                       color: "#fff",
-                      opacity: testingScrcpy ? 0.5 : 1
+                      opacity: (testingScrcpy || !scrcpyStatus?.path) ? 0.5 : 1
                     }}
                   >
                     {testingScrcpy ? "Testing..." : "Test Scrcpy"}
