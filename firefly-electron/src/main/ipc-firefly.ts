@@ -4,9 +4,16 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices, testAdb, testScrcpy } from "./adb";
+import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath } from "./adb";
 
 export function registerFireflyIpc() {
+  // Initialize custom ADB path from config on startup
+  loadConfig().then(config => {
+    if (config.custom_adb_path) {
+      setCustomAdbPath(config.custom_adb_path);
+    }
+  }).catch(console.error);
+
   // --- Config ---
   ipcMain.handle("firefly:get-config", async () => loadConfig());
   ipcMain.handle("firefly:set-config", async (_e, patch) => { await saveConfig(patch); return true; });
@@ -74,6 +81,39 @@ export function registerFireflyIpc() {
       properties: ["openDirectory"],
       defaultPath: initialPath,
     });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle("firefly:pick-file", async (_e, options?: { 
+    title?: string; 
+    defaultPath?: string; 
+    fileType?: 'executable' | 'any';
+  }) => {
+    console.log('[firefly] Opening file picker with options:', options);
+    
+    // Set platform-appropriate filters
+    let filters: Array<{ name: string; extensions: string[] }>;
+    if (options?.fileType === 'executable') {
+      if (process.platform === 'win32') {
+        filters = [
+          { name: 'Executable Files', extensions: ['exe'] },
+          { name: 'All Files', extensions: ['*'] }
+        ];
+      } else {
+        // macOS and Linux - executables don't have extensions
+        filters = [{ name: 'All Files', extensions: ['*'] }];
+      }
+    } else {
+      filters = [{ name: 'All Files', extensions: ['*'] }];
+    }
+    
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      title: options?.title || "Select File",
+      defaultPath: options?.defaultPath,
+      filters: filters,
+    });
+    console.log('[firefly] File picker result:', result);
     return result.canceled ? null : result.filePaths[0];
   });
 
@@ -281,5 +321,21 @@ export function registerFireflyIpc() {
   // --- Scrcpy Diagnostics ---
   ipcMain.handle("firefly:test-scrcpy", async (_e, scrcpyPath: string) => {
     return await testScrcpy(scrcpyPath);
+  });
+
+  ipcMain.handle("firefly:detect-scrcpy", async () => {
+    return await detectScrcpyPath();
+  });
+
+  // --- Custom Tool Paths ---
+  ipcMain.handle("firefly:set-custom-adb-path", async (_e, adbPath: string) => {
+    setCustomAdbPath(adbPath);
+    await saveConfig({ custom_adb_path: adbPath });
+    return true;
+  });
+
+  ipcMain.handle("firefly:set-custom-scrcpy-path", async (_e, scrcpyPath: string) => {
+    await saveConfig({ custom_scrcpy_path: scrcpyPath });
+    return true;
   });
 }

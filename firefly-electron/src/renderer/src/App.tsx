@@ -11,6 +11,7 @@ declare global {
       getConfig: () => Promise<any>;
       setConfig: (cfg: any) => Promise<any>;
       pickDirectory: (initial?: string) => Promise<string | null>;
+      pickFile: (options?: { title?: string; defaultPath?: string; fileType?: 'executable' | 'any' }) => Promise<string | null>;
       listXml: (dir: string) => Promise<{ name: string; path: string; type: 'file' | 'folder' }[]>;
       revealInFileManager: (p: string) => Promise<void>;
       openDefault: (p: string) => Promise<void>;
@@ -30,6 +31,9 @@ declare global {
       installUpdate: () => Promise<void>;
       testAdb: () => Promise<{ working: boolean; path: string; error?: string }>;
       testScrcpy: (scrcpyPath: string) => Promise<{ working: boolean; path: string; error?: string }>;
+      detectScrcpy: () => Promise<{ working: boolean; path: string; error?: string }>;
+      setCustomAdbPath: (adbPath: string) => Promise<boolean>;
+      setCustomScrcpyPath: (scrcpyPath: string) => Promise<boolean>;
     };
   }
 }
@@ -61,7 +65,6 @@ export default function App() {
   const [deviceTitle, setDeviceTitle] = React.useState<string>("No device");
 
   const [dir3cxml, setDir3cxml] = React.useState<string>("");
-  const [scrcpyDir, setScrcpyDir] = React.useState<string>("");
   const [autoOpenScrcpy, setAutoOpenScrcpy] = React.useState<boolean>(false);
 
   const [xmlList, setXmlList] = React.useState<XmlItem[]>([]);
@@ -117,7 +120,6 @@ export default function App() {
       const cfg = await window.firefly.getConfig();
       if (!isMounted.current) return;
       setDir3cxml(cfg?.dir_3cxml || "");
-      setScrcpyDir(cfg?.scrcpy_dir || "");
       setAutoOpenScrcpy(!!cfg?.auto_open_scrcpy);
     } catch (e) {
       console.error("getConfig failed:", e);
@@ -298,8 +300,8 @@ export default function App() {
       }
 
       // 4. Auto-launch scrcpy if enabled
-      if (autoOpenScrcpy && scrcpyDir) {
-        const scrcpyOk = await window.firefly.launchScrcpy({ serial, scrcpyDir });
+      if (autoOpenScrcpy) {
+        const scrcpyOk = await window.firefly.launchScrcpy({ serial });
         if (!scrcpyOk) {
           console.warn("Failed to launch scrcpy, but XML was sent successfully");
         }
@@ -315,11 +317,9 @@ export default function App() {
   }
 
   function SettingsDialog() {
-  const [tmpDir, setTmpDir] = React.useState(dir3cxml);
-  const [tmpScrcpy, setTmpScrcpy] = React.useState(scrcpyDir);
-  // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page
-
-  // Version and update state
+    const [tmpDir, setTmpDir] = React.useState(dir3cxml);
+    // Remove tmpScrcpy - we now use custom path choosers
+    // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page  // Version and update state
   const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
   const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
   const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
@@ -336,7 +336,6 @@ export default function App() {
     React.useEffect(() => {
       if (!showSettings) return;
       setTmpDir(dir3cxml);
-      setTmpScrcpy(scrcpyDir);
       // Load current version and ADB/scrcpy status
       loadCurrentVersion();
       testAdbStatus();
@@ -393,11 +392,9 @@ export default function App() {
     async function save() {
       try {
         await window.firefly.setConfig({
-          dir_3cxml: tmpDir || dir3cxml,
-          scrcpy_dir: tmpScrcpy || scrcpyDir
+          dir_3cxml: tmpDir || dir3cxml
         });
         setDir3cxml(tmpDir || dir3cxml);
-        setScrcpyDir(tmpScrcpy || scrcpyDir);
         setShowSettings(false);
         await refreshDevices();
         await refreshXml();
@@ -409,17 +406,17 @@ export default function App() {
     async function testScrcpyStatus() {
       setTestingScrcpy(true);
       try {
-        // Try to run scrcpy --version at the given path
-        const pathToScrcpy = tmpScrcpy || scrcpyDir;
-        if (!pathToScrcpy) {
-          setScrcpyStatus({ working: false, path: '', error: 'No path set' });
-          return;
+        // If we have a current path, test it; otherwise try auto-detection
+        if (scrcpyStatus?.path) {
+          const result = await window.firefly.testScrcpy(scrcpyStatus.path);
+          setScrcpyStatus(result);
+        } else {
+          // Try auto-detection first
+          const result = await window.firefly.detectScrcpy();
+          setScrcpyStatus(result);
         }
-        // Test scrcpy at the given path
-        const result = await window.firefly.testScrcpy(pathToScrcpy);
-        setScrcpyStatus(result);
       } catch (e) {
-        setScrcpyStatus({ working: false, path: tmpScrcpy || scrcpyDir, error: `Test failed: ${e}` });
+        setScrcpyStatus({ working: false, path: scrcpyStatus?.path || '', error: `Test failed: ${e}` });
       } finally {
         setTestingScrcpy(false);
       }
@@ -432,19 +429,49 @@ export default function App() {
     }
     async function browseScrcpy() {
       try {
-        const d = await window.firefly.pickDirectory(tmpScrcpy || scrcpyDir);
-        if (d) setTmpScrcpy(d);
-      } catch (e) { console.error("pickDirectory scrcpy failed:", e); }
+        console.log("Opening file picker for Scrcpy...");
+        const file = await window.firefly.pickFile({
+          title: "Select Scrcpy Executable",
+          fileType: 'executable'
+        });
+        console.log("File picker result:", file);
+        if (file) {
+          await window.firefly.setCustomScrcpyPath(file);
+          setScrcpyStatus({ working: false, path: file, error: 'Testing...' });
+          await testScrcpyWithPath(file);
+        }
+      } catch (e) { 
+        console.error("pickFile scrcpy failed:", e);
+        alert(`Failed to open file picker: ${e}`);
+      }
     }
+    
     async function browseAdb() {
       try {
-        const d = await window.firefly.pickDirectory();
-        if (d) {
-          // User can set a custom ADB directory - this would need to be stored in config
-          // For now, we'll just test it directly
+        console.log("Opening file picker for ADB...");
+        const file = await window.firefly.pickFile({
+          title: "Select ADB Executable",
+          fileType: 'executable'
+        });
+        console.log("File picker result:", file);
+        if (file) {
+          await window.firefly.setCustomAdbPath(file);
+          setAdbStatus({ working: false, path: file, error: 'Testing...' });
           await testAdbStatus();
         }
-      } catch (e) { console.error("pickDirectory adb failed:", e); }
+      } catch (e) { 
+        console.error("pickFile adb failed:", e);
+        alert(`Failed to open file picker: ${e}`);
+      }
+    }
+    
+    async function testScrcpyWithPath(path: string) {
+      try {
+        const result = await window.firefly.testScrcpy(path);
+        setScrcpyStatus(result);
+      } catch (e) {
+        setScrcpyStatus({ working: false, path, error: `Test failed: ${e}` });
+      }
     }
 
     if (!showSettings) return null;
@@ -482,25 +509,7 @@ export default function App() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-white mb-2">Scrcpy path</label>
-              <div className="flex gap-2">
-                <input
-                  value={tmpScrcpy}
-                  onChange={e => setTmpScrcpy(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-lg text-sm"
-                  style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
-                  placeholder="Path to scrcpy executable"
-                />
-                <button
-                  onClick={browseScrcpy}
-                  className="px-3 py-2 rounded-lg border text-sm"
-                  style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
-                >
-                  Choose...
-                </button>
-              </div>
-            </div>
+
 
             <div className="border-t pt-4" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
               <div className="flex items-center justify-between mb-4">

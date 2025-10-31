@@ -5,7 +5,8 @@ contextBridge.exposeInMainWorld("firefly", {
   getConfig: () => ipcRenderer.invoke("firefly:get-config"),
   setConfig: (cfg: any) => ipcRenderer.invoke("firefly:set-config", cfg),
 
-  pickDirectory: (initialPath?: string) => ipcRenderer.invoke("firefly:pick-directory", initialPath),
+    pickDirectory: (initialPath?: string) => ipcRenderer.invoke("firefly:pick-directory", initialPath),
+    pickFile: (options?: { title?: string; defaultPath?: string; fileType?: 'executable' | 'any' }) => ipcRenderer.invoke("firefly:pick-file", options),
   listXml: (dir: string) => ipcRenderer.invoke("firefly:list-xml", dir),
   revealInFileManager: (p: string) => ipcRenderer.invoke("firefly:reveal", p),
   openDefault: (p: string) => ipcRenderer.invoke("firefly:open-default", p),
@@ -34,6 +35,11 @@ contextBridge.exposeInMainWorld("firefly", {
     
     // Scrcpy Diagnostics
     testScrcpy: (scrcpyPath: string) => ipcRenderer.invoke("firefly:test-scrcpy", scrcpyPath),
+    detectScrcpy: () => ipcRenderer.invoke("firefly:detect-scrcpy"),
+    
+    // Custom Tool Paths
+    setCustomAdbPath: (adbPath: string) => ipcRenderer.invoke("firefly:set-custom-adb-path", adbPath),
+    setCustomScrcpyPath: (scrcpyPath: string) => ipcRenderer.invoke("firefly:set-custom-scrcpy-path", scrcpyPath),
 });
 
 contextBridge.exposeInMainWorld("electron", {

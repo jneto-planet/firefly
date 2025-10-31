@@ -54,8 +54,17 @@ function findAdbPath(): string {
 }
 
 let cachedAdbPath: string | null = null;
+let customAdbPath: string | null = null;
+
+export function setCustomAdbPath(path: string | null) {
+  customAdbPath = path;
+  cachedAdbPath = null; // Clear cache to force re-detection
+}
 
 function getAdbPath(): string {
+  if (customAdbPath) {
+    return customAdbPath;
+  }
   if (!cachedAdbPath) {
     cachedAdbPath = findAdbPath();
   }
@@ -111,6 +120,63 @@ export async function testAdb(): Promise<{ working: boolean; path: string; error
     console.error(`[adb] ADB test failed:`, error);
     return { working: false, path: adbPath, error: `Error: ${error}` };
   }
+}
+
+// Try to find Scrcpy in common locations
+function findScrcpyPath(): string | null {
+  const commonPaths = [
+    // Standard PATH lookup
+    "scrcpy",
+    // Common installation locations
+    "/usr/local/bin/scrcpy",
+    "/opt/homebrew/bin/scrcpy",
+    // Windows common paths
+    "C:\\Program Files\\scrcpy\\scrcpy.exe",
+    "C:\\Program Files (x86)\\scrcpy\\scrcpy.exe",
+    // Expanded home directory
+    path.join(process.env.HOME || "", "scrcpy", "scrcpy"),
+  ];
+
+  // First try which/where command
+  try {
+    const whichResult = execSync(process.platform === 'win32' ? 'where scrcpy' : 'which scrcpy', 
+      { encoding: 'utf8', timeout: 5000 }).trim();
+    if (whichResult && fs.existsSync(whichResult.split('\n')[0])) {
+      console.log(`[scrcpy] Found Scrcpy via which/where: ${whichResult.split('\n')[0]}`);
+      return whichResult.split('\n')[0];
+    }
+  } catch (e) {
+    console.log('[scrcpy] which/where command failed, trying common paths...');
+  }
+
+  // Try common paths
+  for (const scrcpyPath of commonPaths) {
+    try {
+      const expanded = scrcpyPath.startsWith('~') 
+        ? path.join(process.env.HOME || "", scrcpyPath.slice(2))
+        : scrcpyPath;
+      
+      if (expanded !== 'scrcpy' && fs.existsSync(expanded)) {
+        console.log(`[scrcpy] Found Scrcpy at: ${expanded}`);
+        return expanded;
+      }
+    } catch (e) {
+      // Continue to next path
+    }
+  }
+
+  console.log('[scrcpy] Scrcpy not found in common locations');
+  return null;
+}
+
+// Auto-detect Scrcpy path
+export async function detectScrcpyPath(): Promise<{ working: boolean; path: string; error?: string }> {
+  const scrcpyPath = findScrcpyPath();
+  if (!scrcpyPath) {
+    return { working: false, path: '', error: 'Scrcpy not found in common locations. Please use Choose... to select manually.' };
+  }
+  
+  return await testScrcpy(scrcpyPath);
 }
 
 // Test if Scrcpy is working

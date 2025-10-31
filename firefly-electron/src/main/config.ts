@@ -8,6 +8,8 @@ export type FireflyConfig = {
   scrcpy_dir: string;
   auto_open_scrcpy: boolean;
   device_display_mode?: "NAME" | "ID" | "NAME + ID";
+  custom_adb_path?: string;
+  custom_scrcpy_path?: string;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -15,6 +17,8 @@ const DEFAULTS: FireflyConfig = {
   scrcpy_dir: "",
   auto_open_scrcpy: false,
   device_display_mode: "NAME + ID",
+  custom_adb_path: "",
+  custom_scrcpy_path: "",
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");
