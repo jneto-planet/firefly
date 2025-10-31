@@ -158,7 +158,6 @@ export default function Sidebar({
           active={active === "integrate"}
           onClick={() => setActive("integrate")}
         />
-        <NavItem label="IntegraLauncher" disabled iconRight />
         <NavItem label="TaxFree" disabled iconRight />
       </nav>
 

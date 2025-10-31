@@ -213,7 +213,7 @@ export default function App() {
 
       setStatus(
         list.length
-          ? `Connected devices: ${list.map(d => d.serial).join(", ")}`
+          ? "Ready"
           : "No devices. Connect and enable USB debugging."
       );
     } catch (e) {
@@ -317,7 +317,7 @@ export default function App() {
       });
 
       // 2. Push new config
-      const pushResult = await window.firefly.pushAndReplace({
+      await window.firefly.pushAndReplace({
         localPath: file.path,
         pkg: TARGET_PACKAGE,
         relTarget: TARGET_XML_PATH,
@@ -339,7 +339,7 @@ export default function App() {
         }
       }
 
-      setStatus(`Sent "${file.name}" successfully ${pushResult.how}!`);
+      setStatus("IntegraTE configuration updated with success");
     } catch (e: any) {
       setStatus(`Send failed: ${e.message || e}`);
       console.error("onSend failed:", e);
@@ -497,7 +497,7 @@ export default function App() {
         console.log("File picker result:", file);
         if (file) {
           // Only set the path, don't save or test automatically
-          setScrcpyStatus({ working: false, path: file, error: 'Ready to test' });
+          setScrcpyStatus({ working: false, path: file });
         }
       } catch (e) { 
         console.error("pickFile scrcpy failed:", e);
@@ -515,7 +515,7 @@ export default function App() {
         console.log("File picker result:", file);
         if (file) {
           // Only set the path, don't save or test automatically
-          setAdbStatus({ working: false, path: file, error: 'Ready to test' });
+          setAdbStatus({ working: false, path: file });
         }
       } catch (e) { 
         console.error("pickFile adb failed:", e);
@@ -572,7 +572,7 @@ export default function App() {
                     <>
                       <div className={`text-xs ${adbStatus.working ? 'text-green-400' : 'text-red-400'}`}
                         style={{ fontWeight: 500 }}>
-                        {adbStatus.working ? <span>ADB found</span> : <span>ADB not found</span>}
+                        {adbStatus.working ? <span>ADB working correctly</span> : <span>ADB needs configuration</span>}
                       </div>
                       <div className="text-xs text-white/40">Path: {adbStatus.path}</div>
                       {adbStatus.error && (
@@ -594,14 +594,14 @@ export default function App() {
                       opacity: (testingAdb || !adbStatus?.path) ? 0.5 : 1
                     }}
                   >
-                    {testingAdb ? "Testing..." : "Test ADB"}
+                    {testingAdb ? "Testing..." : "Test"}
                   </button>
                   <button
                     onClick={browseAdb}
                     className="px-3 py-1 text-xs rounded border"
                     style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                   >
-                    Choose...
+                    Select...
                   </button>
                 </div>
               </div>
@@ -613,7 +613,7 @@ export default function App() {
                     <>
                       <div className={`text-xs ${scrcpyStatus.working ? 'text-green-400' : 'text-red-400'}`}
                         style={{ fontWeight: 500 }}>
-                        {scrcpyStatus.working ? <span>Scrcpy found</span> : <span>Scrcpy not found</span>}
+                        {scrcpyStatus.working ? <span>Scrcpy working correctly</span> : <span>Scrcpy needs configuration</span>}
                       </div>
                       <div className="text-xs text-white/40">Path: {scrcpyStatus.path}</div>
                       {scrcpyStatus.error && (
@@ -635,7 +635,7 @@ export default function App() {
                       opacity: (testingScrcpy || !scrcpyStatus?.path) ? 0.5 : 1
                     }}
                   >
-                    {testingScrcpy ? "Testing..." : "Test Scrcpy"}
+                    {testingScrcpy ? "Testing..." : "Test"}
                   </button>
                   <button
                     onClick={testLaunchScrcpy}
@@ -647,14 +647,14 @@ export default function App() {
                       opacity: (!scrcpyStatus?.working || !currentSerial()) ? 0.5 : 1
                     }}
                   >
-                    Test Launch
+                    Open scrcpy
                   </button>
                   <button
                     onClick={browseScrcpy}
                     className="px-3 py-1 text-xs rounded border"
                     style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                   >
-                    Choose...
+                    Select...
                   </button>
                 </div>
               </div>
@@ -696,7 +696,7 @@ export default function App() {
               className="flex-1 px-4 py-2 rounded-lg"
               style={{ background: ACCENT, color: "#1a1a1a" }}
             >
-              Save
+              Apply
             </button>
           </div>
         </div>

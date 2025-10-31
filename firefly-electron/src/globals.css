@@ -1,1 +1,6 @@
 @import 'tailwindcss';
+
+/* Custom checkbox styling - golden accent to match buttons */
+input[type="checkbox"] {
+  accent-color: #FFD86A; /* Same golden yellow as button accent */
+}

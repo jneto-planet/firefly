@@ -151,15 +151,6 @@ export default function IntegrateTE({
           >
             <div className="flex-1 overflow-auto">
               <table className="w-full text-sm">
-                <thead
-                  className="sticky top-0 z-10"
-                  style={{ background: "rgba(255,255,255,0.06)", color: "#fff" }}
-                >
-                  <tr>
-                    <th className="text-left px-3 py-2">Template</th>
-                    <th className="text-right px-3 py-2 w-48">Actions</th>
-                  </tr>
-                </thead>
                 <tbody>
                   {xml.map((t, _i) => {
                     const isFolder = t.type === 'folder';
@@ -192,16 +183,7 @@ export default function IntegrateTE({
                         <td className="px-3 py-1 text-right">
                           {isFolder ? (
                             <div className="flex justify-end">
-                              <button
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  window.firefly.revealInFileManager(t.path); 
-                                }}
-                                className="px-2 py-1 rounded-lg border hover:bg-white/5 flex items-center gap-1"
-                                style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
-                              >
-                                <FolderOpen className="h-4 w-4" /> Open
-                              </button>
+                              {/* No button for folders */}
                             </div>
                           ) : (
                             <div className="flex justify-end">
@@ -210,7 +192,7 @@ export default function IntegrateTE({
                                 className="px-2 py-1 rounded-lg border hover:bg-white/5 flex items-center gap-1"
                                 style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                               >
-                                <Eye className="h-4 w-4" /> Open
+                                <Eye className="h-4 w-4" /> Edit
                               </button>
                             </div>
                           )}
