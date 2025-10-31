@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath } from "./adb";
+import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy } from "./adb";
 
 export function registerFireflyIpc() {
   // Initialize custom ADB path from config on startup
@@ -232,9 +232,17 @@ export function registerFireflyIpc() {
   });
 
   ipcMain.handle("firefly:launch-scrcpy", async (_e, { serial }: { serial: string }) => {
-    // Prefer launching scrcpy outside Electron or via a detached child; non-blocking stub here.
-    await adbs(serial, "wait-for-device");
-    return true;
+    try {
+      // Ensure device is ready
+      await adbs(serial, "wait-for-device");
+      
+      // Launch scrcpy
+      const success = await launchScrcpy(serial);
+      return success;
+    } catch (error) {
+      console.error("Failed to launch scrcpy:", error);
+      return false;
+    }
   });
 
   // --- Window Controls ---

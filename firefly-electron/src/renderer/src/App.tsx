@@ -454,6 +454,33 @@ export default function App() {
         setTestingScrcpy(false);
       }
     }
+    async function testLaunchScrcpy() {
+      const serial = currentSerial();
+      if (!serial) {
+        alert("No device selected. Connect a device first.");
+        return;
+      }
+
+      if (!scrcpyStatus?.working) {
+        alert("Scrcpy is not configured or not working. Please test scrcpy first.");
+        return;
+      }
+
+      try {
+        console.log("Testing scrcpy launch for device:", serial);
+        const success = await window.firefly.launchScrcpy({ serial });
+        if (success) {
+          console.log("Scrcpy launched successfully");
+          // You could show a temporary success message here if desired
+        } else {
+          alert("Failed to launch scrcpy. Check console for details.");
+        }
+      } catch (e) {
+        console.error("Test launch failed:", e);
+        alert(`Failed to launch scrcpy: ${e}`);
+      }
+    }
+
     async function browse3c() {
       try {
         const d = await window.firefly.pickDirectory(tmpDir || dir3cxml);
@@ -609,6 +636,18 @@ export default function App() {
                     }}
                   >
                     {testingScrcpy ? "Testing..." : "Test Scrcpy"}
+                  </button>
+                  <button
+                    onClick={testLaunchScrcpy}
+                    disabled={!scrcpyStatus?.working || !currentSerial()}
+                    className="px-3 py-1 text-xs rounded border"
+                    style={{ 
+                      borderColor: "rgba(255,255,255,0.12)", 
+                      color: "#fff",
+                      opacity: (!scrcpyStatus?.working || !currentSerial()) ? 0.5 : 1
+                    }}
+                  >
+                    Test Launch
                   </button>
                   <button
                     onClick={browseScrcpy}

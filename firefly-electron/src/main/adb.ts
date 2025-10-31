@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { loadConfig } from "./config";
 
 export type RunResult = { code: number; out: string; err: string };
 
@@ -231,4 +232,38 @@ export function parseDevices(out: string) {
       online: state === "device",
     };
   });
+}
+
+// Launch Scrcpy for a specific device
+export async function launchScrcpy(serial: string): Promise<boolean> {
+  try {
+    const config = await loadConfig();
+    let scrcpyPath = config.custom_scrcpy_path;
+    
+    // If no custom path is configured, try to find scrcpy
+    if (!scrcpyPath) {
+      const foundPath = findScrcpyPath();
+      if (!foundPath) {
+        console.error(`[scrcpy] No scrcpy path configured and could not auto-detect`);
+        return false;
+      }
+      scrcpyPath = foundPath;
+    }
+    
+    console.log(`[scrcpy] Launching scrcpy for device ${serial} using: ${scrcpyPath}`);
+    
+    // Launch scrcpy in detached mode so it doesn't block the main process
+    const scrcpyProcess = spawn(scrcpyPath, ["-s", serial], {
+      detached: true,
+      stdio: 'ignore' // Don't pipe stdio to avoid keeping the parent process alive
+    });
+    
+    scrcpyProcess.unref(); // Allow the parent process to exit independently
+    
+    console.log(`[scrcpy] Scrcpy launched with PID ${scrcpyProcess.pid}`);
+    return true;
+  } catch (error) {
+    console.error(`[scrcpy] Failed to launch scrcpy:`, error);
+    return false;
+  }
 }
