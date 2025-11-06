@@ -4,6 +4,8 @@ import {
   Settings,
   RefreshCcw,
   MonitorSmartphone,
+  FileText,
+  ScrollText,
 } from "lucide-react";
 
 import fireflylogo from "../assets/icons/firefly.png";
@@ -26,8 +28,8 @@ interface SidebarProps {
   refreshDevices: () => void;
   
   // Navigation
-  active: "integrate" | "launcher" | "taxfree";
-  setActive: (active: "integrate" | "launcher" | "taxfree") => void;
+  active: "configuration" | "logcat";
+  setActive: (active: "configuration" | "logcat") => void;
   
   // Settings
   setShowSettings: (show: boolean) => void;
@@ -42,9 +44,10 @@ interface NavItemProps {
   disabled?: boolean;
   onClick?: () => void;
   iconRight?: boolean;
+  icon?: React.ReactNode;
 }
 
-function NavItem({ label, active, disabled, onClick, iconRight }: NavItemProps) {
+function NavItem({ label, active, disabled, onClick, iconRight, icon }: NavItemProps) {
   return (
     <button
       disabled={disabled}
@@ -54,7 +57,10 @@ function NavItem({ label, active, disabled, onClick, iconRight }: NavItemProps) 
         ${active ? "bg-white/10" : ""}
       `}
     >
-      <span className="text-sm text-white">{label}</span>
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="text-sm text-white">{label}</span>
+      </div>
       {iconRight && <ChevronRight className="h-4 w-4" color="#fff" />}
     </button>
   );
@@ -154,11 +160,17 @@ export default function Sidebar({
       {/* Nav */}
       <nav className="px-2 py-2 flex-1 space-y-1">
         <NavItem
-          label="IntegraTE"
-          active={active === "integrate"}
-          onClick={() => setActive("integrate")}
+          label="Configuration"
+          icon={<FileText className="h-4 w-4" color="#fff" />}
+          active={active === "configuration"}
+          onClick={() => setActive("configuration")}
         />
-        <NavItem label="TaxFree" disabled iconRight />
+        <NavItem
+          label="Logcat"
+          icon={<ScrollText className="h-4 w-4" color="#fff" />}
+          active={active === "logcat"}
+          onClick={() => setActive("logcat")}
+        />
       </nav>
 
       {/* Bottom actions */}

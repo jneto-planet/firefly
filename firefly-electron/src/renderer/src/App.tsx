@@ -1,9 +1,10 @@
 import React from "react";
 import { resolveDeviceIconByModelManu } from "./lib/deviceIcons";
-import IntegrateTE from "./components/IntegrateTE";
 import Sidebar from "./components/Sidebar";
 import SplashScreen from "./components/SplashScreen";
 import TitleBar from "./components/TitleBar";
+import Configuration from "./components/Configuration";
+import Logcat from "./components/Logcat";
 
 declare global {
   interface Window {
@@ -34,6 +35,10 @@ declare global {
       detectScrcpy: () => Promise<{ working: boolean; path: string; error?: string }>;
       setCustomAdbPath: (adbPath: string) => Promise<boolean>;
       setCustomScrcpyPath: (scrcpyPath: string) => Promise<boolean>;
+      // Logcat methods
+      startLogcat: (args: { serial: string; packageName?: string }) => Promise<any>;
+      clearLogcat: (args: { serial: string }) => Promise<any>;
+      getLogcatSnapshot: (args: { serial: string; packageName?: string; maxLines?: number }) => Promise<{ success: boolean; logs?: string; error?: string }>;
     };
   }
 }
@@ -77,7 +82,7 @@ export default function App() {
 
   // UI shell
   const [deviceMenuOpen, setDeviceMenuOpen] = React.useState(false);
-  const [active, setActive] = React.useState<"integrate" | "launcher" | "taxfree">("integrate");
+  const [active, setActive] = React.useState<"configuration" | "logcat">("configuration");
 
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
@@ -339,7 +344,7 @@ export default function App() {
         }
       }
 
-      setStatus("IntegraTE configuration updated with success");
+      setStatus("Configuration updated with success");
     } catch (e: any) {
       setStatus(`Send failed: ${e.message || e}`);
       console.error("onSend failed:", e);
@@ -729,8 +734,8 @@ export default function App() {
         />
 
         <main className="flex-1 flex flex-col overflow-hidden">
-          {active === "integrate" && (
-            <IntegrateTE
+          {active === "configuration" && (
+            <Configuration
               status={status}
               busy={busy}
               dir3cxml={dir3cxml}
@@ -752,13 +757,11 @@ export default function App() {
               onSend={onSend}
             />
           )}
-          {active !== "integrate" && (
-            <div className="h-full flex items-center justify-center text-white/60">
-              <div className="text-center">
-                <div className="text-xl font-semibold mb-1">Coming soon</div>
-                <div className="text-sm">This section is disabled for now.</div>
-              </div>
-            </div>
+          {active === "logcat" && (
+            <Logcat
+              currentSerial={currentSerial}
+              status={status}
+            />
           )}
         </main>
       </div>

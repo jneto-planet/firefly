@@ -1,11 +1,10 @@
 {
-  "name": "firefly-electron",
+  "name": "firefly",
   "productName": "Firefly",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "JNE - Planet Payment Development Team",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

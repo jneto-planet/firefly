@@ -346,4 +346,70 @@ export function registerFireflyIpc() {
     await saveConfig({ custom_scrcpy_path: scrcpyPath });
     return true;
   });
+
+  // --- Logcat ---
+  ipcMain.handle("firefly:start-logcat", async (_e, { serial, packageName }: { serial: string; packageName?: string }) => {
+    console.log(`[firefly] Starting logcat for device ${serial}, package: ${packageName || 'all'}`);
+    
+    // Build logcat command
+    const logcatArgs = ["logcat"];
+    
+    // Clear existing logs first
+    await adbs(serial, "logcat", "-c");
+    
+    // Add package filter if specified
+    if (packageName) {
+      // Filter by package name using grep-like filtering
+      logcatArgs.push("--pid", `$(pidof ${packageName})`);
+    }
+    
+    // Start logcat and return immediately (streaming logs)
+    const result = await adbs(serial, ...logcatArgs);
+    return result;
+  });
+
+  ipcMain.handle("firefly:clear-logcat", async (_e, { serial }: { serial: string }) => {
+    console.log(`[firefly] Clearing logcat for device ${serial}`);
+    const result = await adbs(serial, "logcat", "-c");
+    return result;
+  });
+
+  ipcMain.handle("firefly:get-logcat-snapshot", async (_e, { serial, packageName, maxLines = 2000 }: { 
+    serial: string; 
+    packageName?: string; 
+    maxLines?: number 
+  }) => {
+    console.log(`[firefly] Getting logcat snapshot for device ${serial}, package: ${packageName || 'all'}`);
+    
+    try {
+      // Get ALL logs first without filtering - let the frontend handle filtering
+      // This ensures we don't miss any relevant logs due to imperfect server-side filtering
+      let result;
+      
+      // Try different logcat formats to get the best output similar to Android Studio
+      // Use threadtime format which is most similar to Android Studio
+      result = await adbs(serial, "logcat", "-d", "-v", "threadtime", "-t", maxLines.toString());
+      
+      if (result.code !== 0) {
+        // Fallback to long format if threadtime doesn't work
+        result = await adbs(serial, "logcat", "-d", "-v", "long", "-t", maxLines.toString());
+      }
+      
+      if (result.code !== 0) {
+        // Final fallback to time format
+        result = await adbs(serial, "logcat", "-d", "-v", "time", "-t", maxLines.toString());
+      }
+      
+      if (result.code !== 0) {
+        throw new Error(result.err || "Failed to get logcat");
+      }
+      
+      // Return ALL logs - no server-side filtering
+      // The frontend will handle package filtering more accurately
+      return { success: true, logs: result.out, packageName };
+    } catch (error) {
+      console.error(`[firefly] Failed to get logcat:`, error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
 }

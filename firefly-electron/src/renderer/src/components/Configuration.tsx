@@ -3,6 +3,7 @@ import {
   Send,
   FolderOpen,
   Eye,
+  FileText,
 } from "lucide-react";
 
 interface XmlItem {
@@ -11,7 +12,7 @@ interface XmlItem {
   type: 'file' | 'folder';
 }
 
-interface IntegrateTEProps {
+interface ConfigurationProps {
   // Status and state
   status: string;
   busy: boolean;
@@ -42,7 +43,7 @@ interface IntegrateTEProps {
 
 const ACCENT = "#FFD86A"; // Golden accent color
 
-export default function IntegrateTE({
+export default function Configuration({
   status,
   busy,
   dir3cxml,
@@ -62,7 +63,7 @@ export default function IntegrateTE({
   autoOpenScrcpy,
   setAutoOpenScrcpy,
   onSend,
-}: IntegrateTEProps) {
+}: ConfigurationProps) {
   const serial = currentSerial();
   const xml = filteredXml();
   const canSend = !!serial && selectedIdx != null && filteredXmlFiles().length > 0 && !busy;
@@ -72,7 +73,10 @@ export default function IntegrateTE({
       {/* Top bar within content */}
       <div className="flex items-center justify-between px-6 py-4 border-b"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-        <h2 className="text-lg font-semibold text-white">IntegraTE</h2>
+        <div className="flex items-center gap-2">
+          <FileText className="h-5 w-5" color="#fff" />
+          <h2 className="text-lg font-semibold text-white">Configuration</h2>
+        </div>
         <div className="text-xs text-white/60">{status}</div>
       </div>
 

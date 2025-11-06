@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld("firefly", {
     // Custom Tool Paths
     setCustomAdbPath: (adbPath: string) => ipcRenderer.invoke("firefly:set-custom-adb-path", adbPath),
     setCustomScrcpyPath: (scrcpyPath: string) => ipcRenderer.invoke("firefly:set-custom-scrcpy-path", scrcpyPath),
+    
+    // Logcat
+    startLogcat: (args: { serial: string; packageName?: string }) => ipcRenderer.invoke("firefly:start-logcat", args),
+    clearLogcat: (args: { serial: string }) => ipcRenderer.invoke("firefly:clear-logcat", args),
+    getLogcatSnapshot: (args: { serial: string; packageName?: string; maxLines?: number }) => ipcRenderer.invoke("firefly:get-logcat-snapshot", args),
 });
 
 contextBridge.exposeInMainWorld("electron", {
