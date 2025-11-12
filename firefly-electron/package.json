@@ -1,8 +1,8 @@
 {
   "name": "firefly",
   "productName": "Firefly",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.0.1",
+  "description": "Firefly Desktop Application",
   "main": "./out/main/index.js",
   "author": "JNE - Planet Payment Development Team",
   "scripts": {

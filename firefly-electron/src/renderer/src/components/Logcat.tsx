@@ -1,6 +1,6 @@
 import React from "react";
 import { flushSync } from "react-dom";
-import { RefreshCcw, Trash2, Play, Square, Filter, Search, ChevronDown, BarChart3, ScrollText } from "lucide-react";
+import { RefreshCcw, Trash2, Play, Square, Filter, Search, ChevronDown, BarChart3, Terminal } from "lucide-react";
 
 interface LogcatProps {
   currentSerial: () => string | null;
@@ -451,7 +451,7 @@ export default function Logcat({ currentSerial, status }: LogcatProps) {
 
   // Close dropdowns when clicking outside
   React.useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = () => {
       if (showFiltersDropdown) {
         setShowFiltersDropdown(false);
       }
@@ -475,7 +475,7 @@ export default function Logcat({ currentSerial, status }: LogcatProps) {
       <div className="flex items-center justify-between px-6 py-4 border-b"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
         <div className="flex items-center gap-2">
-          <ScrollText className="h-5 w-5" color="#fff" />
+          <Terminal className="h-5 w-5" color="#fff" />
           <h2 className="text-lg font-semibold text-white">Logcat</h2>
         </div>
         <div className="text-xs text-white/60">{status}</div>

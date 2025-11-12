@@ -3,7 +3,7 @@ import {
   Send,
   FolderOpen,
   Eye,
-  FileText,
+  Blocks,
 } from "lucide-react";
 
 interface XmlItem {
@@ -74,7 +74,7 @@ export default function Configuration({
       <div className="flex items-center justify-between px-6 py-4 border-b"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
         <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5" color="#fff" />
+          <Blocks className="h-5 w-5" color="#fff" />
           <h2 className="text-lg font-semibold text-white">Configuration</h2>
         </div>
         <div className="text-xs text-white/60">{status}</div>

@@ -4,8 +4,8 @@ import {
   Settings,
   RefreshCcw,
   MonitorSmartphone,
-  FileText,
-  ScrollText,
+  Blocks,
+  Terminal,
 } from "lucide-react";
 
 import fireflylogo from "../assets/icons/firefly.png";
@@ -45,9 +45,10 @@ interface NavItemProps {
   onClick?: () => void;
   iconRight?: boolean;
   icon?: React.ReactNode;
+  badge?: string;
 }
 
-function NavItem({ label, active, disabled, onClick, iconRight, icon }: NavItemProps) {
+function NavItem({ label, active, disabled, onClick, iconRight, icon, badge }: NavItemProps) {
   return (
     <button
       disabled={disabled}
@@ -60,6 +61,19 @@ function NavItem({ label, active, disabled, onClick, iconRight, icon }: NavItemP
       <div className="flex items-center gap-2">
         {icon}
         <span className="text-sm text-white">{label}</span>
+        {badge && (
+          <span 
+            className="px-1.5 py-0.5 text-[10px] font-medium rounded"
+            style={{ 
+              background: "rgba(255,216,106,0.15)", 
+              color: "#FFD86A",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px"
+            }}
+          >
+            {badge}
+          </span>
+        )}
       </div>
       {iconRight && <ChevronRight className="h-4 w-4" color="#fff" />}
     </button>
@@ -161,15 +175,16 @@ export default function Sidebar({
       <nav className="px-2 py-2 flex-1 space-y-1">
         <NavItem
           label="Configuration"
-          icon={<FileText className="h-4 w-4" color="#fff" />}
+          icon={<Blocks className="h-4 w-4" color="#fff" />}
           active={active === "configuration"}
           onClick={() => setActive("configuration")}
         />
         <NavItem
           label="Logcat"
-          icon={<ScrollText className="h-4 w-4" color="#fff" />}
+          icon={<Terminal className="h-4 w-4" color="#fff" />}
           active={active === "logcat"}
           onClick={() => setActive("logcat")}
+          badge="beta"
         />
       </nav>
 
