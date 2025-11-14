@@ -45,6 +45,18 @@ contextBridge.exposeInMainWorld("firefly", {
     startLogcat: (args: { serial: string; packageName?: string }) => ipcRenderer.invoke("firefly:start-logcat", args),
     clearLogcat: (args: { serial: string }) => ipcRenderer.invoke("firefly:clear-logcat", args),
     getLogcatSnapshot: (args: { serial: string; packageName?: string; maxLines?: number }) => ipcRenderer.invoke("firefly:get-logcat-snapshot", args),
+    
+    // Video Generator
+    pickImages: () => ipcRenderer.invoke("firefly:pick-images"),
+    pickSaveLocation: (defaultName: string) => ipcRenderer.invoke("firefly:pick-save-location", defaultName),
+    generateVideo: (options: {
+      images: string[];
+      delay: number;
+      terminal: "PAX" | "VIPA";
+      width: number;
+      height: number;
+      outputPath: string;
+    }) => ipcRenderer.invoke("firefly:generate-video", options),
 });
 
 contextBridge.exposeInMainWorld("electron", {

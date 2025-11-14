@@ -412,4 +412,148 @@ export function registerFireflyIpc() {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  // --- Video Generator ---
+  ipcMain.handle("firefly:pick-images", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Select Images",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }
+      ]
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle("firefly:pick-save-location", async (_e, defaultName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: "Save Video As",
+      defaultPath: defaultName,
+      filters: [
+        { name: "Video Files", extensions: ["mp4", "avi"] }
+      ]
+    });
+    return result.canceled ? null : result.filePath;
+  });
+
+  ipcMain.handle("firefly:generate-video", async (_e, options: {
+    images: string[];
+    delay: number;
+    terminal: "PAX" | "VIPA";
+    width: number;
+    height: number;
+    outputPath: string;
+  }) => {
+    const { spawn } = await import("node:child_process");
+    const { images, delay, terminal, width, height, outputPath } = options;
+
+    try {
+      // Ensure dimensions are even
+      const evenWidth = width - (width % 2);
+      const evenHeight = height - (height % 2);
+
+      // Use a reasonable base framerate (0.5 fps works well for slideshows)
+      // Then duplicate frames to fill the delay duration
+      const baseFps = 0.5;
+      const framerate = `${baseFps}`;
+
+      // Build ffmpeg command - CRITICAL: use -loop 1 for static images to create video streams
+      const ffmpegArgs: string[] = ["-y"];
+      
+      const filterChains: string[] = [];
+      
+      // Add all images as looping inputs with framerate and duration
+      // -loop 1 makes ffmpeg loop the still image
+      // -framerate sets the frame rate for the looped image
+      // -t sets the duration in seconds
+      for (const img of images) {
+        ffmpegArgs.push(
+          "-loop", "1",
+          "-framerate", framerate,
+          "-t", delay.toString(),
+          "-i", img
+        );
+      }
+      
+      // Build filter_complex: handle transparency, scale without upscaling, pad with white background
+      // Key: Use scale with min to prevent upscaling - images stay at original size if smaller
+      for (let i = 0; i < images.length; i++) {
+        filterChains.push(
+          // Blend transparent PNGs with white background first
+          `color=white:s=3840x2160:r=${baseFps}:d=${delay}[white${i}];` +
+          `[white${i}][${i}:v]scale2ref[bg${i}][img${i}];` +
+          `[bg${i}][img${i}]overlay=format=auto,` +
+          `scale='min(${evenWidth},iw)':'min(${evenHeight},ih)':force_original_aspect_ratio=decrease:flags=lanczos,` +
+          `pad=${evenWidth}:${evenHeight}:(ow-iw)/2:(oh-ih)/2:color=white,` +
+          `setsar=1,` +
+          `scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709,` +
+          `format=yuv420p,` +
+          `setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709[v${i}]`
+        );
+      }
+      
+      const concatInputs = Array.from({ length: images.length }, (_, i) => `[v${i}]`).join("");
+      const filterComplex = filterChains.join(";") + `;${concatInputs}concat=n=${images.length}:v=1:a=0[vout]`;
+      
+      ffmpegArgs.push("-filter_complex", filterComplex, "-map", "[vout]");
+
+      // Add encoding settings based on terminal type
+      if (terminal === "PAX") {
+        ffmpegArgs.push(
+          "-c:v", "libx264",
+          "-profile:v", "main",
+          "-preset", "veryslow",
+          "-x264-params", `crf=23:ref=1:level=3.1`,
+          "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart",
+          outputPath
+        );
+      } else if (terminal === "VIPA") {
+        // VIPA (P400) uses Main profile in AVI container - matching working reference
+        ffmpegArgs.push(
+          "-c:v", "libx264",
+          "-profile:v", "main",
+          "-preset", "veryslow",
+          "-x264-params", `crf=23:ref=1:level=3.1`,
+          "-pix_fmt", "yuv420p",
+          outputPath
+        );
+      }
+
+      console.log("[ffmpeg] Running command:", "ffmpeg", ffmpegArgs.join(" "));
+
+      return new Promise<{ success: boolean; error?: string }>((resolve) => {
+        const ffmpeg = spawn("ffmpeg", ffmpegArgs);
+        let stderr = "";
+        let stdout = "";
+
+        ffmpeg.stdout.on("data", (data) => {
+          stdout += data.toString();
+        });
+
+        ffmpeg.stderr.on("data", (data) => {
+          stderr += data.toString();
+          console.log("[ffmpeg]", data.toString());
+        });
+
+        ffmpeg.on("close", (code) => {
+          if (code === 0) {
+            console.log("[ffmpeg] Success!");
+            resolve({ success: true });
+          } else {
+            console.error("[ffmpeg] Failed with code", code);
+            console.error("[ffmpeg] stderr:", stderr);
+            resolve({ success: false, error: `ffmpeg exited with code ${code}\n\nLast output:\n${stderr.slice(-1000)}` });
+          }
+        });
+
+        ffmpeg.on("error", (err) => {
+          console.error("[ffmpeg] Error spawning:", err);
+          resolve({ success: false, error: `Failed to spawn ffmpeg: ${err.message}` });
+        });
+      });
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
 }

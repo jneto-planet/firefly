@@ -6,6 +6,7 @@ import {
   MonitorSmartphone,
   Blocks,
   Terminal,
+  Film,
 } from "lucide-react";
 
 import fireflylogo from "../assets/icons/firefly.png";
@@ -28,8 +29,8 @@ interface SidebarProps {
   refreshDevices: () => void;
   
   // Navigation
-  active: "configuration" | "logcat";
-  setActive: (active: "configuration" | "logcat") => void;
+  active: "configuration" | "logcat" | "video-generator";
+  setActive: (active: "configuration" | "logcat" | "video-generator") => void;
   
   // Settings
   setShowSettings: (show: boolean) => void;
@@ -185,6 +186,12 @@ export default function Sidebar({
           active={active === "logcat"}
           onClick={() => setActive("logcat")}
           badge="beta"
+        />
+        <NavItem
+          label="Video Generator"
+          icon={<Film className="h-4 w-4" color="#fff" />}
+          active={active === "video-generator"}
+          onClick={() => setActive("video-generator")}
         />
       </nav>
 
