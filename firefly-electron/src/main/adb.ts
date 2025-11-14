@@ -1,14 +1,43 @@
 // src/main/adb.ts
 import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
+import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
 
 export type RunResult = { code: number; out: string; err: string };
 
+/**
+ * Get the path to bundled ADB
+ */
+function getBundledAdbPath(): string | null {
+  const isDev = !app.isPackaged;
+  if (isDev) return null; // Use system ADB in development
+
+  const platform = process.platform;
+  const resourcesPath = process.resourcesPath;
+
+  if (platform === "darwin") {
+    const adbPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "platform-tools", "darwin", "platform-tools", "adb");
+    if (fs.existsSync(adbPath)) return adbPath;
+  } else if (platform === "win32") {
+    const adbPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "platform-tools", "windows", "platform-tools", "adb.exe");
+    if (fs.existsSync(adbPath)) return adbPath;
+  }
+
+  return null;
+}
+
 // Try to find ADB in common locations
 function findAdbPath(): string {
+  // First, try bundled ADB
+  const bundledAdb = getBundledAdbPath();
+  if (bundledAdb) {
+    console.log(`[adb] Using bundled ADB: ${bundledAdb}`);
+    return bundledAdb;
+  }
+
   const commonPaths = [
     // Standard PATH lookup
     "adb",
@@ -123,8 +152,36 @@ export async function testAdb(): Promise<{ working: boolean; path: string; error
   }
 }
 
+/**
+ * Get the path to bundled Scrcpy
+ */
+function getBundledScrcpyPath(): string | null {
+  const isDev = !app.isPackaged;
+  if (isDev) return null; // Use system scrcpy in development
+
+  const platform = process.platform;
+  const resourcesPath = process.resourcesPath;
+
+  if (platform === "darwin") {
+    const scrcpyPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "platform-tools", "darwin", "bin", "scrcpy");
+    if (fs.existsSync(scrcpyPath)) return scrcpyPath;
+  } else if (platform === "win32") {
+    const scrcpyPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "platform-tools", "windows", "scrcpy.exe");
+    if (fs.existsSync(scrcpyPath)) return scrcpyPath;
+  }
+
+  return null;
+}
+
 // Try to find Scrcpy in common locations
 function findScrcpyPath(): string | null {
+  // First, try bundled Scrcpy
+  const bundledScrcpy = getBundledScrcpyPath();
+  if (bundledScrcpy) {
+    console.log(`[scrcpy] Using bundled Scrcpy: ${bundledScrcpy}`);
+    return bundledScrcpy;
+  }
+
   const commonPaths = [
     // Standard PATH lookup
     "scrcpy",
@@ -252,10 +309,24 @@ export async function launchScrcpy(serial: string): Promise<boolean> {
     
     console.log(`[scrcpy] Launching scrcpy for device ${serial} using: ${scrcpyPath}`);
     
+    // Set up environment for bundled scrcpy
+    const env = { ...process.env };
+    const bundledScrcpy = getBundledScrcpyPath();
+    if (bundledScrcpy && scrcpyPath === bundledScrcpy) {
+      const resourcesPath = process.resourcesPath;
+      if (process.platform === "darwin") {
+        // Set SCRCPY_SERVER_PATH for macOS bundled version
+        env.SCRCPY_SERVER_PATH = path.join(resourcesPath, "app.asar.unpacked", "resources", "platform-tools", "darwin", "share", "scrcpy", "scrcpy-server");
+        console.log(`[scrcpy] Using bundled server: ${env.SCRCPY_SERVER_PATH}`);
+      }
+      // Windows scrcpy.exe looks for scrcpy-server in the same directory, which we have
+    }
+    
     // Launch scrcpy in detached mode so it doesn't block the main process
     const scrcpyProcess = spawn(scrcpyPath, ["-s", serial], {
       detached: true,
-      stdio: 'ignore' // Don't pipe stdio to avoid keeping the parent process alive
+      stdio: 'ignore', // Don't pipe stdio to avoid keeping the parent process alive
+      env
     });
     
     scrcpyProcess.unref(); // Allow the parent process to exit independently

@@ -6,6 +6,31 @@ import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
 import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy } from "./adb";
 
+/**
+ * Get the path to the bundled ffmpeg executable
+ */
+function getFfmpegPath(): string {
+  const platform = process.platform;
+  const isDev = !app.isPackaged;
+
+  if (isDev) {
+    // In development, use system ffmpeg
+    return "ffmpeg";
+  }
+
+  // In production, use bundled ffmpeg
+  const resourcesPath = process.resourcesPath;
+  
+  if (platform === "darwin") {
+    return path.join(resourcesPath, "app.asar.unpacked", "resources", "ffmpeg", "ffmpeg-darwin-arm64");
+  } else if (platform === "win32") {
+    return path.join(resourcesPath, "app.asar.unpacked", "resources", "ffmpeg", "ffmpeg-win32-x64.exe");
+  }
+  
+  // Fallback to system ffmpeg
+  return "ffmpeg";
+}
+
 export function registerFireflyIpc() {
   // Initialize custom ADB path from config on startup
   loadConfig().then(config => {
@@ -522,8 +547,11 @@ export function registerFireflyIpc() {
 
       console.log("[ffmpeg] Running command:", "ffmpeg", ffmpegArgs.join(" "));
 
+      const ffmpegPath = getFfmpegPath();
+      console.log("[ffmpeg] Using ffmpeg at:", ffmpegPath);
+
       return new Promise<{ success: boolean; error?: string }>((resolve) => {
-        const ffmpeg = spawn("ffmpeg", ffmpegArgs);
+        const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
         let stderr = "";
         let stdout = "";
 
