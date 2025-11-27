@@ -168,7 +168,83 @@ export function registerFireflyIpc() {
     const r2 = await adbs(serial, "shell", "getprop", "ro.product.manufacturer");
     if (r1.code !== 0) throw new Error(r1.err || "getprop model failed");
     if (r2.code !== 0) throw new Error(r2.err || "getprop manufacturer failed");
-    return { model: r1.out.trim(), manufacturer: r2.out.trim() };
+    
+    // Try multiple methods to get IP address
+    let ipAddress: string | null = null;
+    
+    // Method 1: Try ip route command
+    const r3 = await adbs(serial, "shell", "ip", "route", "get", "1.1.1.1");
+    if (r3.code === 0) {
+      const match = r3.out.match(/src\s+([0-9.]+)/);
+      if (match) {
+        ipAddress = match[1];
+      }
+    }
+    
+    // Method 2: If method 1 failed, try ifconfig wlan0
+    if (!ipAddress) {
+      const r4 = await adbs(serial, "shell", "ifconfig", "wlan0");
+      if (r4.code === 0) {
+        const match = r4.out.match(/inet addr:([0-9.]+)/);
+        if (match) {
+          ipAddress = match[1];
+        } else {
+          // Try newer format
+          const match2 = r4.out.match(/inet\s+([0-9.]+)/);
+          if (match2) {
+            ipAddress = match2[1];
+          }
+        }
+      }
+    }
+    
+    // Get battery level
+    let batteryLevel: number | null = null;
+    let isCharging = false;
+    const rBattery = await adbs(serial, "shell", "dumpsys", "battery");
+    if (rBattery.code === 0) {
+      const levelMatch = rBattery.out.match(/level:\s*(\d+)/);
+      if (levelMatch) {
+        batteryLevel = parseInt(levelMatch[1]);
+      }
+      // Check charging status (AC powered, USB powered, or Wireless powered)
+      isCharging = /AC powered:\s*true/i.test(rBattery.out) || 
+                   /USB powered:\s*true/i.test(rBattery.out) ||
+                   /Wireless powered:\s*true/i.test(rBattery.out);
+    }
+    
+    // Get Android version with build info
+    let androidVersion: string | null = null;
+    const rVersion = await adbs(serial, "shell", "getprop", "ro.build.version.release");
+    const rBuildId = await adbs(serial, "shell", "getprop", "ro.build.id");
+    const rBuildDisplay = await adbs(serial, "shell", "getprop", "ro.build.display.id");
+    
+    if (rVersion.code === 0) {
+      let versionStr = rVersion.out.trim();
+      
+      // Try to get more detailed build info
+      if (rBuildDisplay.code === 0 && rBuildDisplay.out.trim()) {
+        // Use the full build display ID which often contains detailed version info
+        androidVersion = rBuildDisplay.out.trim();
+      } else if (rBuildId.code === 0 && rBuildId.out.trim()) {
+        // Fallback to combining version with build ID
+        androidVersion = `${versionStr}_${rBuildId.out.trim()}`;
+      } else {
+        // Just use the version number
+        androidVersion = versionStr;
+      }
+    }
+    
+    console.log(`[firefly] Device ${serial} - IP: ${ipAddress || 'not found'}, Battery: ${batteryLevel}%, Charging: ${isCharging}, Android: ${androidVersion}`);
+    
+    return { 
+      model: r1.out.trim(), 
+      manufacturer: r2.out.trim(), 
+      ipAddress,
+      batteryLevel,
+      isCharging,
+      androidVersion
+    };
   });
 
   // --- Push/replace flow (fully async, with timeouts) ---
@@ -256,13 +332,19 @@ export function registerFireflyIpc() {
     return true;
   });
 
-  ipcMain.handle("firefly:launch-scrcpy", async (_e, { serial }: { serial: string }) => {
+  ipcMain.handle("firefly:launch-scrcpy", async (event, { serial }: { serial: string }) => {
     try {
       // Ensure device is ready
       await adbs(serial, "wait-for-device");
       
-      // Launch scrcpy
-      const success = await launchScrcpy(serial);
+      // Launch scrcpy with callback to notify renderer when it closes
+      const success = await launchScrcpy(serial, () => {
+        // Notify renderer that scrcpy has closed
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win && !win.isDestroyed()) {
+          win.webContents.send("firefly:scrcpy-closed", { serial });
+        }
+      });
       return success;
     } catch (error) {
       console.error("Failed to launch scrcpy:", error);

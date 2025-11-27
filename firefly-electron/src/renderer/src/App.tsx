@@ -6,6 +6,7 @@ import TitleBar from "./components/TitleBar";
 import Configuration from "./components/Configuration";
 import Logcat from "./components/Logcat";
 import VideoGenerator from "./components/VideoGenerator";
+import { Save, XCircle } from "lucide-react";
 
 declare global {
   interface Window {
@@ -19,7 +20,7 @@ declare global {
       openDefault: (p: string) => Promise<void>;
       openWith: (p: string) => Promise<void>;
       listDevices: () => Promise<Device[]>;
-      getDeviceProps: (serial: string) => Promise<{ model?: string; manufacturer?: string }>;
+      getDeviceProps: (serial: string) => Promise<{ model: string; manufacturer: string; ipAddress: string | null; batteryLevel: number | null; isCharging: boolean; androidVersion: string | null }>;
       deleteOldCccFiles: (args: { pkg: string; serial: string }) => Promise<any>;
       pushAndReplace: (args: { localPath: string; pkg: string; relTarget: string; sdcardTemp: string; serial: string }) => Promise<{ how: string }>;
       restartApp: (pkg: string) => Promise<boolean>;
@@ -51,6 +52,8 @@ declare global {
         height: number;
         outputPath: string;
       }) => Promise<{ success: boolean; error?: string }>;
+      // Event listeners
+      onScrcpyClosed: (callback: (data: { serial: string }) => void) => () => void;
     };
   }
 }
@@ -80,9 +83,16 @@ export default function App() {
   const [selectedSerial, setSelectedSerial] = React.useState<string>("");
   const [deviceIcon, setDeviceIcon] = React.useState<string | null>(null);
   const [deviceTitle, setDeviceTitle] = React.useState<string>("No device");
+  const [deviceIcons, setDeviceIcons] = React.useState<Record<string, string | null>>({});
+  const [deviceIpAddress, setDeviceIpAddress] = React.useState<string | null>(null);
+  const [deviceBatteryLevel, setDeviceBatteryLevel] = React.useState<number | null>(null);
+  const [deviceIsCharging, setDeviceIsCharging] = React.useState<boolean>(false);
+  const [deviceAndroidVersion, setDeviceAndroidVersion] = React.useState<string | null>(null);
+
+  const [pollingEnabled, setPollingEnabled] = React.useState<boolean>(true);
+  const [pollingInterval, setPollingInterval] = React.useState<number>(2000);
 
   const [dir3cxml, setDir3cxml] = React.useState<string>("");
-  const [autoOpenScrcpy, setAutoOpenScrcpy] = React.useState<boolean>(false);
 
   const [xmlList, setXmlList] = React.useState<XmlItem[]>([]);
   const [selectedIdx, setSelectedIdx] = React.useState<number | null>(null);
@@ -117,12 +127,36 @@ export default function App() {
   // Reentrancy/cleanup guards
   const isMounted = React.useRef(true);
   const refreshingDevices = React.useRef(false);
+  const [scrcpyLaunched, setScrcpyLaunched] = React.useState(false); // Track if scrcpy has been launched for current session
+  
   React.useEffect(() => {
     isMounted.current = true;
     boot();
-    return () => { isMounted.current = false; };
+    
+    // Listen for scrcpy close event from main process
+    const cleanup = window.firefly.onScrcpyClosed(() => {
+      console.log("[renderer] Scrcpy process closed, resetting flag");
+      setScrcpyLaunched(false);
+    });
+    
+    return () => { 
+      isMounted.current = false;
+      cleanup();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-refresh devices based on polling config
+  React.useEffect(() => {
+    if (!pollingEnabled) return;
+
+    const interval = setInterval(() => {
+      refreshDevices();
+    }, pollingInterval);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSerial, devices, pollingEnabled, pollingInterval]);
 
   // whenever dir3cxml changes, (re)load the list
   React.useEffect(() => {
@@ -151,7 +185,8 @@ export default function App() {
       const cfg = await window.firefly.getConfig();
       if (!isMounted.current) return;
       setDir3cxml(cfg?.dir_3cxml || "");
-      setAutoOpenScrcpy(!!cfg?.auto_open_scrcpy);
+      setPollingEnabled(cfg?.polling_enabled ?? true);
+      setPollingInterval(cfg?.polling_interval ?? 2000);
       
       // Initialize ADB and Scrcpy status from environment detection only
       // If found in environment, show the path; if not found, show empty state
@@ -192,11 +227,26 @@ export default function App() {
       if (!isMounted.current) return;
       setDevices(list);
 
+      // Fetch icons for all online devices
+      const iconsMap: Record<string, string | null> = {};
+      for (const device of list.filter(d => d.online)) {
+        try {
+          const props = await window.firefly.getDeviceProps(device.serial);
+          const iconUrl = resolveDeviceIconByModelManu(props.model, props.manufacturer);
+          iconsMap[device.serial] = iconUrl || null;
+        } catch {
+          iconsMap[device.serial] = null;
+        }
+      }
+      if (!isMounted.current) return;
+      setDeviceIcons(iconsMap);
+
       // If we had a selectedSerial but it's no longer available, clear it
       if (selectedSerial && !list.some(d => d.serial === selectedSerial)) {
         setSelectedSerial("");
         setDeviceIcon(null);
         setDeviceTitle("No device");
+        setScrcpyLaunched(false); // Reset scrcpy flag when device disconnects
       }
 
       // Auto-select first online device if none selected
@@ -246,10 +296,19 @@ export default function App() {
       const props = await window.firefly.getDeviceProps(serial);
       if (!isMounted.current) return;
       const iconUrl = resolveDeviceIconByModelManu(props.model, props.manufacturer);
+      console.log('[firefly] Device props received:', { model: props.model, manufacturer: props.manufacturer, ipAddress: props.ipAddress, battery: props.batteryLevel, charging: props.isCharging, android: props.androidVersion });
       setDeviceIcon(iconUrl || null);
+      setDeviceIpAddress(props.ipAddress);
+      setDeviceBatteryLevel(props.batteryLevel);
+      setDeviceIsCharging(props.isCharging);
+      setDeviceAndroidVersion(props.androidVersion);
     } catch {
       if (!isMounted.current) return;
       setDeviceIcon(null);
+      setDeviceIpAddress(null);
+      setDeviceBatteryLevel(null);
+      setDeviceIsCharging(false);
+      setDeviceAndroidVersion(null);
     }
   }
 
@@ -300,9 +359,32 @@ export default function App() {
     return selectedSerial || null;
   }
 
+  async function handleLaunchScrcpy() {
+    const serial = currentSerial();
+    if (!serial) {
+      return; // Button should be disabled anyway
+    }
+
+    // Prevent multiple launches
+    if (scrcpyLaunched) {
+      console.log("Scrcpy already launched for this session");
+      return;
+    }
+
+    try {
+      const success = await window.firefly.launchScrcpy({ serial });
+      if (success) {
+        setScrcpyLaunched(true); // Mark as launched to track state
+      }
+    } catch (e) {
+      console.error("Failed to launch scrcpy:", e);
+    }
+  }
+
   async function onSelectDeviceSerial(serial: string) {
     setSelectedSerial(serial);
     setDeviceMenuOpen(false);
+    setScrcpyLaunched(false); // Reset scrcpy flag when device changes
     if (!serial) {
       setDeviceIcon(null);
       setDeviceTitle("No device");
@@ -313,6 +395,18 @@ export default function App() {
     setDeviceTitle(found?.name || serial);
     // Then update the icon asynchronously
     updateDeviceIconOnly(serial);
+  }
+
+  async function handleChooseDirectory() {
+    try {
+      const d = await window.firefly.pickDirectory(dir3cxml);
+      if (d) {
+        setDir3cxml(d);
+        await window.firefly.setConfig({ dir_3cxml: d });
+      }
+    } catch (e) {
+      console.error("pickDirectory 3cxml failed:", e);
+    }
   }
 
   async function onSend() {
@@ -348,14 +442,6 @@ export default function App() {
         throw new Error("Failed to restart terminal app");
       }
 
-      // 4. Auto-launch scrcpy if enabled
-      if (autoOpenScrcpy) {
-        const scrcpyOk = await window.firefly.launchScrcpy({ serial });
-        if (!scrcpyOk) {
-          console.warn("Failed to launch scrcpy, but XML was sent successfully");
-        }
-      }
-
       setStatus("Configuration updated with success");
     } catch (e: any) {
       setStatus(`Send failed: ${e.message || e}`);
@@ -366,16 +452,9 @@ export default function App() {
   }
 
   function SettingsDialog() {
-    const [tmpDir, setTmpDir] = React.useState(dir3cxml);
-    // Remove tmpScrcpy - we now use custom path choosers
-    // Remove tmpAuto, scrcpy open-after-send is now only on Integrate page
-
-
-
     // keep fields in sync if settings reopen
     React.useEffect(() => {
       if (!showSettings) return;
-      setTmpDir(dir3cxml);
       // Load current version only
       loadCurrentVersion();
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -394,10 +473,13 @@ export default function App() {
       setCheckingForUpdates(true);
       try {
         const result = await window.firefly.checkForUpdates();
-        setUpdateAvailable(result.available);
+        
+        // Only mark as available if the version is different from current
+        const isUpdateAvailable = result.available && result.version !== currentVersion;
+        setUpdateAvailable(isUpdateAvailable);
         setUpdateVersion(result.version);
         
-        if (!result.available) {
+        if (!isUpdateAvailable) {
           if ((result as any).message) {
             // Development mode
             alert((result as any).message);
@@ -433,9 +515,7 @@ export default function App() {
 
     async function save() {
       try {
-        const configUpdates: any = {
-          dir_3cxml: tmpDir || dir3cxml
-        };
+        const configUpdates: any = {};
         
         // Only save ADB/Scrcpy paths if they have been tested and are working
         if (adbStatus?.path && adbStatus.working) {
@@ -448,11 +528,13 @@ export default function App() {
           configUpdates.custom_scrcpy_path = scrcpyStatus.path;
         }
         
+        // Save polling settings
+        configUpdates.polling_enabled = pollingEnabled;
+        configUpdates.polling_interval = pollingInterval;
+        
         await window.firefly.setConfig(configUpdates);
-        setDir3cxml(tmpDir || dir3cxml);
         setShowSettings(false);
         await refreshDevices();
-        await refreshXml();
       } catch (e) {
         console.error("save settings failed:", e);
         alert("Failed to save settings");
@@ -471,39 +553,8 @@ export default function App() {
         setTestingScrcpy(false);
       }
     }
-    async function testLaunchScrcpy() {
-      const serial = currentSerial();
-      if (!serial) {
-        alert("No device selected. Connect a device first.");
-        return;
-      }
 
-      if (!scrcpyStatus?.working) {
-        alert("Scrcpy is not configured or not working. Please test scrcpy first.");
-        return;
-      }
 
-      try {
-        console.log("Testing scrcpy launch for device:", serial);
-        const success = await window.firefly.launchScrcpy({ serial });
-        if (success) {
-          console.log("Scrcpy launched successfully");
-          // You could show a temporary success message here if desired
-        } else {
-          alert("Failed to launch scrcpy. Check console for details.");
-        }
-      } catch (e) {
-        console.error("Test launch failed:", e);
-        alert(`Failed to launch scrcpy: ${e}`);
-      }
-    }
-
-    async function browse3c() {
-      try {
-        const d = await window.firefly.pickDirectory(tmpDir || dir3cxml);
-        if (d) setTmpDir(d);
-      } catch (e) { console.error("pickDirectory 3cxml failed:", e); }
-    }
     async function browseScrcpy() {
       try {
         console.log("Opening file picker for Scrcpy...");
@@ -559,28 +610,6 @@ export default function App() {
           <h2 className="text-xl font-semibold text-white">Settings</h2>
 
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-white mb-2">3cxml Folder</label>
-              <div className="flex gap-2">
-                <input
-                  value={tmpDir}
-                  onChange={e => setTmpDir(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-lg text-sm"
-                  style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
-                  placeholder="Select folder containing XML templates"
-                />
-                <button
-                  onClick={browse3c}
-                  className="px-3 py-2 rounded-lg border text-sm"
-                  style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
-                >
-                  Browse
-                </button>
-              </div>
-            </div>
-
-
-
             <div className="border-t pt-4" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -591,7 +620,7 @@ export default function App() {
                         style={{ fontWeight: 500 }}>
                         {adbStatus.working ? <span>ADB working correctly</span> : <span>ADB needs configuration</span>}
                       </div>
-                      <div className="text-xs text-white/40">Path: {adbStatus.path}</div>
+                      <div className="text-xs text-white/40 max-w-xs truncate" title={adbStatus.path}>Path: {adbStatus.path}</div>
                       {adbStatus.error && (
                         <div className="text-xs text-red-400 mt-1">{adbStatus.error}</div>
                       )}
@@ -632,7 +661,7 @@ export default function App() {
                         style={{ fontWeight: 500 }}>
                         {scrcpyStatus.working ? <span>Scrcpy working correctly</span> : <span>Scrcpy needs configuration</span>}
                       </div>
-                      <div className="text-xs text-white/40">Path: {scrcpyStatus.path}</div>
+                      <div className="text-xs text-white/40 max-w-xs truncate" title={scrcpyStatus.path}>Path: {scrcpyStatus.path}</div>
                       {scrcpyStatus.error && (
                         <div className="text-xs text-red-400 mt-1">{scrcpyStatus.error}</div>
                       )}
@@ -655,18 +684,6 @@ export default function App() {
                     {testingScrcpy ? "Testing..." : "Test"}
                   </button>
                   <button
-                    onClick={testLaunchScrcpy}
-                    disabled={!scrcpyStatus?.working || !currentSerial()}
-                    className="px-3 py-1 text-xs rounded border"
-                    style={{ 
-                      borderColor: "rgba(255,255,255,0.12)", 
-                      color: "#fff",
-                      opacity: (!scrcpyStatus?.working || !currentSerial()) ? 0.5 : 1
-                    }}
-                  >
-                    Open scrcpy
-                  </button>
-                  <button
                     onClick={browseScrcpy}
                     className="px-3 py-1 text-xs rounded border"
                     style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
@@ -675,6 +692,41 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">Polling</div>
+                  <div className="text-xs text-white/60">Auto-refresh device list</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pollingEnabled}
+                      onChange={(e) => setPollingEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded"
+                      style={{ accentColor: ACCENT }}
+                    />
+                    <span className="text-xs text-white">Enabled</span>
+                  </label>
+                  {pollingEnabled && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={pollingInterval / 1000}
+                        onChange={(e) => setPollingInterval(Math.max(1, parseInt(e.target.value) || 1) * 1000)}
+                        min="1"
+                        max="60"
+                        className="w-16 px-2 py-1 text-xs rounded border bg-transparent text-white"
+                        style={{ borderColor: "rgba(255,255,255,0.12)" }}
+                      />
+                      <span className="text-xs text-white/60">sec</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="my-4" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}></div>
 
               <div className="flex items-center justify-between mb-2">
                 <div>
@@ -703,16 +755,18 @@ export default function App() {
           <div className="flex gap-2 pt-4">
             <button
               onClick={() => setShowSettings(false)}
-              className="flex-1 px-4 py-2 rounded-lg border"
+              className="flex-1 px-4 py-2 rounded-lg border flex items-center justify-center gap-2"
               style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
             >
+              <XCircle size={16} />
               Cancel
             </button>
             <button
               onClick={save}
-              className="flex-1 px-4 py-2 rounded-lg"
+              className="flex-1 px-4 py-2 rounded-lg flex items-center justify-center gap-2"
               style={{ background: ACCENT, color: "#1a1a1a" }}
             >
+              <Save size={16} />
               Apply
             </button>
           </div>
@@ -728,21 +782,30 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen">
-      <TitleBar />
+      <TitleBar 
+        devices={devices}
+        selectedSerial={selectedSerial}
+        deviceTitle={deviceTitle}
+        deviceIcons={deviceIcons}
+        deviceMenuOpen={deviceMenuOpen}
+        setDeviceMenuOpen={setDeviceMenuOpen}
+        onSelectDeviceSerial={onSelectDeviceSerial}
+      />
       <div className="h-full flex" style={{ background: "#08121A", paddingTop: "32px" }}>
         <Sidebar
-          devices={devices}
-          selectedSerial={selectedSerial}
           deviceTitle={deviceTitle}
           deviceIcon={deviceIcon}
-          deviceMenuOpen={deviceMenuOpen}
-          setDeviceMenuOpen={setDeviceMenuOpen}
-          onSelectDeviceSerial={onSelectDeviceSerial}
+          deviceIpAddress={deviceIpAddress}
+          deviceBatteryLevel={deviceBatteryLevel}
+          deviceIsCharging={deviceIsCharging}
+          deviceAndroidVersion={deviceAndroidVersion}
           refreshDevices={refreshDevices}
           active={active}
           setActive={setActive}
           setShowSettings={setShowSettings}
           currentSerial={currentSerial}
+          launchScrcpy={handleLaunchScrcpy}
+          scrcpyActive={scrcpyLaunched}
         />
 
         <main className="flex-1 flex flex-col overflow-hidden">
@@ -755,6 +818,7 @@ export default function App() {
               setCurrentDir={setCurrentDir}
               navigateUp={navigateUp}
               navigateToFolder={navigateToFolder}
+              onChooseDirectory={handleChooseDirectory}
               xmlList={xmlList}
               filter={filter}
               setFilter={setFilter}
@@ -764,8 +828,6 @@ export default function App() {
               filteredXmlFiles={filteredXmlFiles}
               refreshXml={refreshXml}
               currentSerial={currentSerial}
-              autoOpenScrcpy={autoOpenScrcpy}
-              setAutoOpenScrcpy={setAutoOpenScrcpy}
               onSend={onSend}
             />
           )}

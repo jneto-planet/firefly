@@ -57,6 +57,13 @@ contextBridge.exposeInMainWorld("firefly", {
       height: number;
       outputPath: string;
     }) => ipcRenderer.invoke("firefly:generate-video", options),
+    
+    // Event listeners
+    onScrcpyClosed: (callback: (data: { serial: string }) => void) => {
+      const listener = (_event: any, data: { serial: string }) => callback(data);
+      ipcRenderer.on("firefly:scrcpy-closed", listener);
+      return () => ipcRenderer.removeListener("firefly:scrcpy-closed", listener);
+    },
 });
 
 contextBridge.exposeInMainWorld("electron", {

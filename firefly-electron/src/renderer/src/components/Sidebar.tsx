@@ -1,5 +1,4 @@
 import {
-  ChevronDown,
   ChevronRight,
   Settings,
   RefreshCcw,
@@ -7,25 +6,20 @@ import {
   Blocks,
   Terminal,
   Film,
+  ScreenShare,
 } from "lucide-react";
 
 import fireflylogo from "../assets/icons/firefly.png";
-
-interface Device {
-  serial: string;
-  name: string;
-  online: boolean;
-}
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./Tooltip";
 
 interface SidebarProps {
   // Device management
-  devices: Device[];
-  selectedSerial: string;
   deviceTitle: string;
   deviceIcon: string | null;
-  deviceMenuOpen: boolean;
-  setDeviceMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
-  onSelectDeviceSerial: (serial: string) => void;
+  deviceIpAddress: string | null;
+  deviceBatteryLevel: number | null;
+  deviceIsCharging: boolean;
+  deviceAndroidVersion: string | null;
   refreshDevices: () => void;
   
   // Navigation
@@ -37,6 +31,10 @@ interface SidebarProps {
   
   // Helper functions
   currentSerial: () => string | null;
+  
+  // Scrcpy
+  launchScrcpy: () => void;
+  scrcpyActive: boolean;
 }
 
 interface NavItemProps {
@@ -82,27 +80,29 @@ function NavItem({ label, active, disabled, onClick, iconRight, icon, badge }: N
 }
 
 export default function Sidebar({
-  devices,
-  selectedSerial,
   deviceTitle,
   deviceIcon,
-  deviceMenuOpen,
-  setDeviceMenuOpen,
-  onSelectDeviceSerial,
+  deviceIpAddress,
+  deviceBatteryLevel,
+  deviceIsCharging,
+  deviceAndroidVersion,
   refreshDevices,
   active,
   setActive,
   setShowSettings,
   currentSerial,
+  launchScrcpy,
+  scrcpyActive,
 }: SidebarProps) {
   const serial = currentSerial();
   const currentOnline = serial != null;
 
   return (
-    <aside
-      className="h-full flex flex-col border-r"
-      style={{ width: 268, background: "#0b1720", borderColor: "rgba(255,255,255,0.08)" }}
-    >
+    <TooltipProvider delayDuration={500}>
+      <aside
+        className="h-full flex flex-col border-r"
+        style={{ width: 268, background: "#0b1720", borderColor: "rgba(255,255,255,0.08)" }}
+      >
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 pt-4 pb-3">
         <img src={fireflylogo} alt="Firefly" className="w-10 h-10 object-contain" />
@@ -116,102 +116,159 @@ export default function Sidebar({
           Firefly
         </span>
       </div>
-      
-      {/* Device dropdown */}
-      <div className="p-4">
-        <button
-          className="w-full flex items-center gap-3 rounded-xl px-3 py-2"
-          style={{ background: "rgba(255,255,255,0.06)" }}
-          onClick={() => setDeviceMenuOpen(v => !v)}
-        >
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-lg"
-            style={{ background: "rgba(255,255,255,0.08)" }}
-          >
-            {deviceIcon
-              ? <img src={deviceIcon} className="h-8 w-8 object-contain" />
-              : <MonitorSmartphone className="h-6 w-6" color="#fff" />
-            }
-          </div>
-          <div className="flex-1 text-left">
-            <div className="text-sm font-medium text-white truncate">{deviceTitle || "No device"}</div>
-            <div className="text-[11px] text-white/60 truncate">{currentOnline ? serial : "No device connected"}</div>
-          </div>
-          <ChevronDown className={`h-4 w-4 transition ${deviceMenuOpen ? "rotate-180" : ""}`} color="#fff" />
-        </button>
-
-        {/* Device menu */}
-        {deviceMenuOpen && (
-          <div
-            className="mt-2 max-h-64 overflow-auto rounded-xl"
-            style={{ background: "rgba(8,15,22,0.98)", border: "1px solid rgba(255,255,255,0.08)" }}
-          >
-            {devices.length === 0 && (
-              <div className="px-3 py-3 text-sm text-white/60">No devices found</div>
-            )}
-            {devices.map((d) => {
-              const active = d.serial === selectedSerial;
-              return (
-                <button
-                  key={d.serial}
-                  disabled={!d.online}
-                  onClick={() => onSelectDeviceSerial(d.serial)}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-3 ${active ? "bg-white/5" : "hover:bg-white/5"} ${!d.online ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white/10">
-                    <MonitorSmartphone className="h-4 w-4" color="#fff" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[13px] text-white">{d.name || d.serial}</div>
-                    <div className="text-[11px] text-white/60">{d.serial}{!d.online ? " (offline)" : ""}</div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
       {/* Nav */}
-      <nav className="px-2 py-2 flex-1 space-y-1">
-        <NavItem
-          label="Configuration"
-          icon={<Blocks className="h-4 w-4" color="#fff" />}
-          active={active === "configuration"}
-          onClick={() => setActive("configuration")}
-        />
-        <NavItem
-          label="Logcat"
-          icon={<Terminal className="h-4 w-4" color="#fff" />}
-          active={active === "logcat"}
-          onClick={() => setActive("logcat")}
-          badge="beta"
-        />
-        <NavItem
-          label="Video Generator"
-          icon={<Film className="h-4 w-4" color="#fff" />}
-          active={active === "video-generator"}
-          onClick={() => setActive("video-generator")}
-        />
+      <nav className="px-2 py-2 flex-1 space-y-3">
+        {/* Device Section */}
+        <div>
+          <div className="px-3 py-1 mb-1">
+            <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Device</span>
+          </div>
+          
+          {/* Device Details (Display Only) */}
+          {currentOnline && serial && (
+            <div className="px-2 mb-2">
+              <div className="px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+                <div className="flex items-center gap-2 mb-2 pb-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div
+                    className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.08)" }}
+                  >
+                    {deviceIcon
+                      ? <img src={deviceIcon} className="h-6 w-6 object-contain" />
+                      : <MonitorSmartphone className="h-5 w-5" color="#fff" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-white truncate text-left">{deviceTitle}</div>
+                    <div className="text-[10px] text-white/60 font-mono truncate text-left">{serial}</div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {deviceIpAddress && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-[10px] text-white/40 uppercase tracking-wider">IP Address</span>
+                      <span className="text-[11px] text-white/80 font-mono text-right">{deviceIpAddress}</span>
+                    </div>
+                  )}
+                  {deviceBatteryLevel !== null && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-[10px] text-white/40 uppercase tracking-wider">Battery</span>
+                      <span className="text-[11px] text-white/80 text-right">
+                        {deviceBatteryLevel}%{deviceIsCharging && " ⚡"}
+                      </span>
+                    </div>
+                  )}
+                  {deviceAndroidVersion && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-[10px] text-white/40 uppercase tracking-wider">Android</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-[11px] text-white/80 text-right max-w-[140px] truncate cursor-default">{deviceAndroidVersion}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>{deviceAndroidVersion}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions Section */}
+        <div>
+          <div className="px-3 py-1 mb-1">
+            <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Adb Actions</span>
+          </div>
+          <div className="space-y-1">
+            <NavItem
+              label="Configuration"
+              icon={<Blocks className="h-4 w-4" color="#fff" />}
+              active={active === "configuration"}
+              onClick={() => setActive("configuration")}
+            />
+            <NavItem
+              label="Logcat"
+              icon={<Terminal className="h-4 w-4" color="#fff" />}
+              active={active === "logcat"}
+              onClick={() => setActive("logcat")}
+              badge="beta"
+            />
+          </div>
+        </div>
+
+        {/* Tools Section */}
+        <div>
+          <div className="px-3 py-1 mb-1">
+            <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Tools</span>
+          </div>
+          <div className="space-y-1">
+            <NavItem
+              label="Video Generator"
+              icon={<Film className="h-4 w-4" color="#fff" />}
+              active={active === "video-generator"}
+              onClick={() => setActive("video-generator")}
+            />
+          </div>
+        </div>
       </nav>
 
       {/* Bottom actions */}
       <div className="p-3 mt-auto flex items-center justify-between">
-        <button
-          title="Settings"
-          onClick={() => setShowSettings(true)}
-          className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
-        >
-          <Settings className="h-5 w-5" color="#fff" />
-        </button>
-        <button
-          title="Refresh devices"
-          onClick={refreshDevices}
-          className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
-        >
-          <RefreshCcw className="h-5 w-5" color="#fff" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
+            >
+              <Settings className="h-5 w-5" color="#fff" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Settings</TooltipContent>
+        </Tooltip>
+        <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={launchScrcpy}
+                disabled={!currentOnline}
+                className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                  scrcpyActive
+                    ? "bg-white/10"
+                    : currentOnline
+                    ? "hover:bg-white/10"
+                    : "opacity-40 cursor-not-allowed"
+                }`}
+              >
+                <ScreenShare
+                  className="h-5 w-5"
+                  color={scrcpyActive ? "#FFD86A" : "#fff"}
+                />
+                {scrcpyActive && (
+                  <span
+                    className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                    style={{ backgroundColor: "#FFD86A" }}
+                  />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Launch Scrcpy</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={refreshDevices}
+                className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
+              >
+                <RefreshCcw className="h-5 w-5" color="#fff" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh devices</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </aside>
+    </TooltipProvider>
   );
 }

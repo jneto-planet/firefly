@@ -1,6 +1,5 @@
 // src/main/adb.ts
-import { spawn } from "node:child_process";
-import { execSync } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -292,7 +291,7 @@ export function parseDevices(out: string) {
 }
 
 // Launch Scrcpy for a specific device
-export async function launchScrcpy(serial: string): Promise<boolean> {
+export async function launchScrcpy(serial: string, onClose?: () => void): Promise<boolean> {
   try {
     const config = await loadConfig();
     let scrcpyPath = config.custom_scrcpy_path;
@@ -322,14 +321,20 @@ export async function launchScrcpy(serial: string): Promise<boolean> {
       // Windows scrcpy.exe looks for scrcpy-server in the same directory, which we have
     }
     
-    // Launch scrcpy in detached mode so it doesn't block the main process
+    // Launch scrcpy - don't detach so we can track when it closes
     const scrcpyProcess = spawn(scrcpyPath, ["-s", serial], {
-      detached: true,
-      stdio: 'ignore', // Don't pipe stdio to avoid keeping the parent process alive
+      detached: false,
+      stdio: 'ignore',
       env
     });
     
-    scrcpyProcess.unref(); // Allow the parent process to exit independently
+    // Track when the process closes
+    scrcpyProcess.on('close', (code) => {
+      console.log(`[scrcpy] Scrcpy process closed with code ${code}`);
+      if (onClose) {
+        onClose();
+      }
+    });
     
     console.log(`[scrcpy] Scrcpy launched with PID ${scrcpyProcess.pid}`);
     return true;

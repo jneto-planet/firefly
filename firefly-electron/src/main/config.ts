@@ -10,6 +10,8 @@ export type FireflyConfig = {
   device_display_mode?: "NAME" | "ID" | "NAME + ID";
   custom_adb_path?: string;
   custom_scrcpy_path?: string;
+  polling_enabled?: boolean;
+  polling_interval?: number;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -19,6 +21,8 @@ const DEFAULTS: FireflyConfig = {
   device_display_mode: "NAME + ID",
   custom_adb_path: "",
   custom_scrcpy_path: "",
+  polling_enabled: true,
+  polling_interval: 2000,
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");

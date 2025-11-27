@@ -4,6 +4,7 @@ import {
   FolderOpen,
   Eye,
   Blocks,
+  Search,
 } from "lucide-react";
 
 interface XmlItem {
@@ -23,6 +24,7 @@ interface ConfigurationProps {
   setCurrentDir: (dir: string) => void;
   navigateUp: () => void;
   navigateToFolder: (path: string) => void;
+  onChooseDirectory: () => void;
   
   // XML data and filtering
   xmlList: XmlItem[];
@@ -36,8 +38,6 @@ interface ConfigurationProps {
   
   // Device and sending
   currentSerial: () => string | null;
-  autoOpenScrcpy: boolean;
-  setAutoOpenScrcpy: (val: boolean) => void;
   onSend: () => void;
 }
 
@@ -51,6 +51,7 @@ export default function Configuration({
   setCurrentDir,
   navigateUp,
   navigateToFolder,
+  onChooseDirectory,
   xmlList: _xmlList,
   filter,
   setFilter,
@@ -60,8 +61,6 @@ export default function Configuration({
   filteredXmlFiles,
   refreshXml,
   currentSerial,
-  autoOpenScrcpy,
-  setAutoOpenScrcpy,
   onSend,
 }: ConfigurationProps) {
   const serial = currentSerial();
@@ -87,7 +86,7 @@ export default function Configuration({
             {/* Breadcrumbs */}
             <div className="flex items-center gap-1 text-sm text-white/60 truncate max-w-lg">
               {!dir3cxml ? (
-                <span>(3cxml folder not set — configure in Settings)</span>
+                <span>(3cxml folder not set)</span>
               ) : (
                 <div className="flex items-center gap-1" title={currentDir}>
                   <button
@@ -108,6 +107,16 @@ export default function Configuration({
               )}
             </div>
             
+            {/* Choose button - always visible */}
+            <button
+              onClick={onChooseDirectory}
+              className="flex items-center gap-1 text-sm px-3 py-1 rounded-lg border hover:bg-white/5 whitespace-nowrap"
+              style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
+              title="Choose 3cxml folder"
+            >
+              <FolderOpen className="h-4 w-4" /> Choose...
+            </button>
+            
             {dir3cxml && (
               <>
                 {/* Back button */}
@@ -126,27 +135,30 @@ export default function Configuration({
                   className="flex items-center gap-1 text-sm px-2 py-1 rounded-lg border hover:bg-white/5"
                   style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                 >
-                  <FolderOpen className="h-4 w-4" /> Open
+                  <Eye className="h-4 w-4" /> Open
                 </button>
                 <button
                   title="Refresh templates"
                   onClick={refreshXml}
                   className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
                 >
-                  <RefreshCcw className="h-5 w-5" color="#fff" />
+                  <RefreshCcw className="h-4 w-4" color="#fff" />
                 </button>
               </>
             )}
           </div>
 
           <div className="flex items-center gap-3">
-            <input
-              placeholder="Search…"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg flex-1 min-w-[220px]"
-              style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
-            />
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: "rgba(255,255,255,0.4)" }} />
+              <input
+                placeholder="Search…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="w-full pl-10 pr-3 py-2 rounded-lg outline-none"
+                style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
+              />
+            </div>
           </div>
 
           <div
@@ -219,25 +231,7 @@ export default function Configuration({
 
         {/* Bottom: send panel */}
         <section className="pt-4">
-          <div className="flex items-center justify-end gap-4">
-            {/* Checkbox close to button */}
-            <label className="flex items-center gap-2 text-sm text-white/80 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoOpenScrcpy}
-                onChange={async e => {
-                  const val = e.target.checked;
-                  setAutoOpenScrcpy(val);
-                  try {
-                    await window.firefly.setConfig({ auto_open_scrcpy: val });
-                  } catch (err) {
-                    console.error("setConfig failed:", err);
-                  }
-                }}
-              />
-              Open scrcpy after send
-            </label>
-            
+          <div className="flex items-center justify-end">
             {/* Send button */}
             <button
               disabled={!canSend}
