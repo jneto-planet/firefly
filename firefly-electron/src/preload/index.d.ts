@@ -10,12 +10,14 @@ declare global {
         scrcpy_dir: string;
         auto_open_scrcpy: boolean;
         device_display_mode?: "NAME" | "ID" | "NAME + ID";
+        xml_editor_path?: string;
       }>;
       setConfig: (cfg: Partial<{
         dir_3cxml: string;
         scrcpy_dir: string;
         auto_open_scrcpy: boolean;
         device_display_mode?: "NAME" | "ID" | "NAME + ID";
+        xml_editor_path?: string;
       }>) => Promise<boolean>;
 
       // --- Files / XML ---
@@ -23,6 +25,7 @@ declare global {
       revealInFileManager: (p: string) => Promise<void>;
       openDefault: (p: string) => Promise<void>;
       openWith: (p: string) => Promise<void>;
+      getDefaultXmlEditor: () => Promise<string>;
 
       // --- Devices / ADB ---
       listDevices: () => Promise<{ serial: string; name: string; online: boolean }[]>;
@@ -33,6 +36,9 @@ declare global {
       pushAndReplace: (args: any) => Promise<{ how: string }>;
       restartApp: (pkg: string) => Promise<boolean>;
       launchScrcpy: (args: any) => Promise<boolean>;
+      openButterfly: () => Promise<boolean>;
+      takeScreenshot: (args: { serial: string }) => Promise<string>;
+      saveScreenshot: (args: { base64Data: string; deviceName: string }) => Promise<string | null>;
     };
 
     electron: {

@@ -132,6 +132,7 @@ export function runAsync(
 
 export const adb  = (...args: string[]) => runAsync(getAdbPath(), args);
 export const adbs = (serial: string, ...args: string[]) => runAsync(getAdbPath(), ["-s", serial, ...args]);
+export { getAdbPath };
 
 // Test if ADB is working
 export async function testAdb(): Promise<{ working: boolean; path: string; error?: string }> {

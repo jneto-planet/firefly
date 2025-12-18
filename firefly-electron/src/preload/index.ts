@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("firefly", {
   revealInFileManager: (p: string) => ipcRenderer.invoke("firefly:reveal", p),
   openDefault: (p: string) => ipcRenderer.invoke("firefly:open-default", p),
   openWith: (p: string) => ipcRenderer.invoke("firefly:open-with", p),
+  getDefaultXmlEditor: () => ipcRenderer.invoke("firefly:get-default-xml-editor"),
 
   listDevices: () => ipcRenderer.invoke("firefly:list-devices"),
   getDeviceProps: (serial: string) => ipcRenderer.invoke("firefly:get-device-props", serial),
@@ -18,7 +19,12 @@ contextBridge.exposeInMainWorld("firefly", {
   deleteOldCccFiles: (args: any) => ipcRenderer.invoke("firefly:delete-old", args),
   pushAndReplace: (args: any) => ipcRenderer.invoke("firefly:push-replace", args),
   restartApp: (pkg: string) => ipcRenderer.invoke("firefly:restart", pkg),
+  pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => ipcRenderer.invoke("firefly:pull-xml-from-device", args),
+  clearTidFromDataStore: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:clear-tid-from-datastore", args),
   launchScrcpy: (args: any) => ipcRenderer.invoke("firefly:launch-scrcpy", args),
+  openButterfly: () => ipcRenderer.invoke("firefly:open-butterfly"),
+  takeScreenshot: (args: { serial: string }) => ipcRenderer.invoke("firefly:take-screenshot", args),
+  saveScreenshot: (args: { base64Data: string; deviceName: string }) => ipcRenderer.invoke("firefly:save-screenshot", args),
 
     windowMinimize: () => ipcRenderer.invoke("firefly:window-minimize"),
     windowMaximize: () => ipcRenderer.invoke("firefly:window-maximize"),

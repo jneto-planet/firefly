@@ -1,5 +1,6 @@
 import React from "react";
 import { flushSync } from "react-dom";
+import { motion } from "framer-motion";
 import { RefreshCcw, Trash2, Play, Square, Filter, Search, ChevronDown, BarChart3, Terminal } from "lucide-react";
 
 interface LogcatProps {
@@ -523,7 +524,12 @@ export default function Logcat({ currentSerial, status }: LogcatProps) {
               opacity: (!serial || isRunning) ? 0.5 : 1
             }}
           >
-            <RefreshCcw className="h-4 w-4" />
+            <motion.div
+              whileHover={(!serial || isRunning) ? {} : { rotate: 180 }}
+              transition={{ duration: 0.3 }}
+            >
+              <RefreshCcw className="h-4 w-4" />
+            </motion.div>
             Refresh
           </button>
 

@@ -4,7 +4,44 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy } from "./adb";
+import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy, getAdbPath } from "./adb";
+import { spawn } from "node:child_process";
+
+/**
+ * Get the path to the bundled Butterfly script
+ */
+function getButterflyScriptPath(): string | null {
+  const platform = process.platform;
+  const isDev = !app.isPackaged;
+
+  if (isDev) {
+    // In development, look in resources folder
+    const devPath = path.join(app.getAppPath(), "resources", "butterfly");
+    const script = platform === "win32" ? "Butterfly.bat" : "Butterfly.sh";
+    const scriptPath = path.join(devPath, script);
+    if (require("fs").existsSync(scriptPath)) {
+      return scriptPath;
+    }
+    return null;
+  }
+
+  // In production, use bundled Butterfly
+  const resourcesPath = process.resourcesPath;
+  
+  if (platform === "darwin") {
+    const scriptPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "butterfly", "Butterfly.sh");
+    if (require("fs").existsSync(scriptPath)) {
+      return scriptPath;
+    }
+  } else if (platform === "win32") {
+    const scriptPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "butterfly", "Butterfly.bat");
+    if (require("fs").existsSync(scriptPath)) {
+      return scriptPath;
+    }
+  }
+  
+  return null;
+}
 
 /**
  * Get the path to the bundled ffmpeg executable
@@ -95,7 +132,96 @@ export function registerFireflyIpc() {
       shell.showItemInFolder(p);
     }
   });
-  ipcMain.handle("firefly:open-default", async (_e, p: string) => { await shell.openPath(p); });
+  ipcMain.handle("firefly:open-default", async (_e, p: string) => { 
+    const config = await loadConfig();
+    const customEditor = config.xml_editor_path;
+    
+    // If custom editor is set and the file is XML, use custom editor
+    if (customEditor && p.toLowerCase().endsWith('.xml')) {
+      try {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        
+        // Open with custom editor
+        const platform = process.platform;
+        if (platform === 'darwin') {
+          await execAsync(`open -a "${customEditor}" "${p}"`);
+        } else if (platform === 'win32') {
+          await execAsync(`"${customEditor}" "${p}"`);
+        } else {
+          await execAsync(`"${customEditor}" "${p}"`);
+        }
+        return;
+      } catch (error) {
+        console.error('[firefly] Failed to open with custom editor:', error);
+        // Fall back to default
+      }
+    }
+    
+    // Use system default
+    await shell.openPath(p); 
+  });
+  
+  ipcMain.handle("firefly:get-default-xml-editor", async () => {
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      
+      const platform = process.platform;
+      
+      if (platform === 'darwin') {
+        // macOS: Try to get the default app using duti or LSLaunchServices
+        try {
+          // Try using mdls on a temporary XML file
+          const tmpFile = path.join(app.getPath('temp'), 'test.xml');
+          await fs.writeFile(tmpFile, '<?xml version="1.0"?><root/>', 'utf-8');
+          
+          const { stdout } = await execAsync(`mdls -name kMDItemContentType -name kMDItemKind "${tmpFile}"`);
+          
+          // Try to get default app using open -Ra
+          const { stdout: appInfo } = await execAsync(`/usr/bin/osascript -e 'tell application "System Events" to get name of application file id (get id of application processes whose visible is true)'`).catch(() => ({ stdout: '' }));
+          
+          // Cleanup temp file
+          await fs.unlink(tmpFile).catch(() => {});
+          
+          // Simple fallback: just return a generic message
+          return "System default (typically TextEdit or Xcode)";
+        } catch (e) {
+          return "System default (typically TextEdit or Xcode)";
+        }
+      } else if (platform === 'win32') {
+        // Windows: Query file association
+        try {
+          const { stdout } = await execAsync('assoc .xml');
+          const fileType = stdout.trim().split('=')[1];
+          if (fileType) {
+            const { stdout: appPath } = await execAsync(`ftype ${fileType}`);
+            const match = appPath.match(/"([^"]+)"/);
+            if (match && match[1]) {
+              return path.basename(match[1]);
+            }
+          }
+        } catch (e) {
+          // Fallback
+        }
+        return "System default (typically Notepad)";
+      } else {
+        // Linux: Try xdg-mime
+        try {
+          const { stdout } = await execAsync('xdg-mime query default text/xml');
+          const result = stdout.trim();
+          return result || "System default";
+        } catch (e) {
+          return "System default";
+        }
+      }
+    } catch (error) {
+      console.error('[firefly] Failed to detect default XML editor:', error);
+      return "System default";
+    }
+  });
   ipcMain.handle("firefly:open-with", async (_e, _p: string) => {
     await dialog.showOpenDialog({ properties: ["openFile"] }); // implement chooser logic if needed
     return true;
@@ -203,10 +329,16 @@ export function registerFireflyIpc() {
     let isCharging = false;
     const rBattery = await adbs(serial, "shell", "dumpsys", "battery");
     if (rBattery.code === 0) {
-      const levelMatch = rBattery.out.match(/level:\s*(\d+)/);
-      if (levelMatch) {
-        batteryLevel = parseInt(levelMatch[1]);
+      // Check if battery is present (devices without battery report "present: false")
+      const batteryPresent = /present:\s*true/i.test(rBattery.out);
+      
+      if (batteryPresent) {
+        const levelMatch = rBattery.out.match(/level:\s*(\d+)/);
+        if (levelMatch) {
+          batteryLevel = parseInt(levelMatch[1]);
+        }
       }
+      
       // Check charging status (AC powered, USB powered, or Wireless powered)
       isCharging = /AC powered:\s*true/i.test(rBattery.out) || 
                    /USB powered:\s*true/i.test(rBattery.out) ||
@@ -332,6 +464,53 @@ export function registerFireflyIpc() {
     return true;
   });
 
+  // --- Pull XML from Device ---
+  ipcMain.handle("firefly:pull-xml-from-device", async (_e, args: {
+    pkg: string; relTarget: string; serial: string; defaultSavePath: string;
+  }) => {
+    const { pkg, relTarget, serial, defaultSavePath } = args;
+    console.log(`[firefly] Pulling XML from device ${serial}: ${relTarget}`);
+
+    try {
+      // Step 1: Read the XML file from device
+      const relativeTarget = relTarget.startsWith('/') ? relTarget.substring(1) : relTarget;
+      let r = await adbs(serial, "shell", "run-as", pkg, "cat", relativeTarget);
+      console.log(`[firefly] Read XML file result: code=${r.code}`);
+      
+      if (r.code !== 0) {
+        throw new Error(`Failed to read XML file from device: ${r.err || "File may not exist"}`);
+      }
+
+      const xmlContent = r.out;
+      if (!xmlContent || xmlContent.trim().length === 0) {
+        throw new Error("XML file is empty or could not be read");
+      }
+
+      // Step 2: Show save dialog
+      const result = await dialog.showSaveDialog({
+        title: "Save Configuration XML",
+        defaultPath: defaultSavePath,
+        filters: [
+          { name: "XML Files", extensions: ["xml"] },
+          { name: "All Files", extensions: ["*"] }
+        ]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, canceled: true };
+      }
+
+      // Step 3: Save the file
+      await fs.writeFile(result.filePath, xmlContent, 'utf-8');
+      console.log(`[firefly] XML file saved to: ${result.filePath}`);
+
+      return { success: true, filePath: result.filePath };
+    } catch (error) {
+      console.error(`[firefly] Failed to pull XML:`, error);
+      throw error;
+    }
+  });
+
   ipcMain.handle("firefly:launch-scrcpy", async (event, { serial }: { serial: string }) => {
     try {
       // Ensure device is ready
@@ -349,6 +528,214 @@ export function registerFireflyIpc() {
     } catch (error) {
       console.error("Failed to launch scrcpy:", error);
       return false;
+    }
+  });
+
+  ipcMain.handle("firefly:open-butterfly", async () => {
+    try {
+      const scriptPath = getButterflyScriptPath();
+      
+      if (!scriptPath) {
+        console.error("[firefly] Butterfly script not found");
+        dialog.showErrorBox(
+          "Butterfly Not Found",
+          "The Butterfly application could not be found. Please ensure it is properly installed."
+        );
+        return false;
+      }
+
+      console.log(`[firefly] Launching Butterfly from: ${scriptPath}`);
+      
+      const platform = process.platform;
+      const workingDir = path.dirname(scriptPath);
+      
+      let childProcess;
+      
+      if (platform === "win32") {
+        // Windows: Execute the .bat file
+        childProcess = spawn("cmd.exe", ["/c", scriptPath], {
+          cwd: workingDir,
+          detached: true,
+          stdio: "ignore"
+        });
+      } else {
+        // macOS/Linux: Execute the .sh file
+        childProcess = spawn("sh", [scriptPath], {
+          cwd: workingDir,
+          detached: true,
+          stdio: "ignore"
+        });
+      }
+      
+      childProcess.unref();
+      
+      console.log("[firefly] Butterfly launched successfully");
+      return true;
+    } catch (error) {
+      console.error("[firefly] Failed to open Butterfly:", error);
+      dialog.showErrorBox(
+        "Failed to Launch Butterfly",
+        `An error occurred while launching Butterfly: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    }
+  });
+
+  // --- Clear TID from DataStore ---
+  ipcMain.handle("firefly:clear-tid-from-datastore", async (_e, args: {
+    pkg: string; serial: string;
+  }) => {
+    const { pkg, serial } = args;
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execPromise = promisify(exec);
+    const adbPath = getAdbPath();
+    
+    console.log(`[firefly] Clearing TID from DataStore and Firmware for ${serial}`);
+
+    const filesToProcess = [
+      {
+        path: "files/store/integrator/DataStoreIntegrator.properties",
+        tempFile: "/sdcard/DataStoreIntegrator.properties.tmp",
+        name: "DataStore"
+      },
+      {
+        path: "files/store/firmware/firmware.config.properties",
+        tempFile: "/sdcard/firmware.config.properties.tmp",
+        name: "Firmware"
+      }
+    ];
+
+    const results: string[] = [];
+    let anyModified = false;
+
+    for (const file of filesToProcess) {
+      try {
+        console.log(`[firefly] Processing ${file.name} file: ${file.path}`);
+        
+        // Step 1: Read the file
+        let r = await adbs(serial, "shell", "run-as", pkg, "cat", file.path);
+        console.log(`[firefly] Read ${file.name} file result: code=${r.code}`);
+        
+        if (r.code !== 0) {
+          console.warn(`[firefly] Could not read ${file.name} file (may not exist yet): ${r.err}`);
+          results.push(`${file.name}: file not found (may be new installation)`);
+          continue;
+        }
+
+        // Step 2: Filter out the INSTANCE_TERMINAL_IDENTIFICATION line
+        const originalContent = r.out;
+        const lines = originalContent.split('\n');
+        const filteredLines = lines.filter(line => !line.trim().startsWith('INSTANCE_TERMINAL_IDENTIFICATION'));
+        
+        // Check if any line was actually removed
+        if (lines.length === filteredLines.length) {
+          console.log(`[firefly] No INSTANCE_TERMINAL_IDENTIFICATION found in ${file.name}, nothing to remove`);
+          results.push(`${file.name}: TID not found`);
+          continue;
+        }
+        
+        const newContent = filteredLines.join('\n');
+        const removedCount = lines.length - filteredLines.length;
+        console.log(`[firefly] Removed ${removedCount} line(s) containing TID from ${file.name}`);
+
+        // Step 3: Write filtered content to temp file on sdcard
+        const escapedContent = newContent.replace(/'/g, "'\\''"); // Escape single quotes for shell
+        await execPromise(`"${adbPath}" -s ${serial} shell "echo '${escapedContent}' > ${file.tempFile}"`);
+        
+        // Step 4: Copy temp file to target location
+        r = await adbs(serial, "shell", "run-as", pkg, "cp", file.tempFile, file.path);
+        console.log(`[firefly] Copy filtered ${file.name} file result: code=${r.code}`);
+        
+        if (r.code !== 0) {
+          await adbs(serial, "shell", "rm", file.tempFile); // cleanup
+          console.error(`[firefly] Failed to copy filtered ${file.name} file: ${r.err}`);
+          results.push(`${file.name}: failed to update`);
+          continue;
+        }
+
+        // Step 5: Set proper permissions
+        await adbs(serial, "shell", "run-as", pkg, "chmod", "644", file.path);
+
+        // Step 6: Clean up temp file
+        await adbs(serial, "shell", "rm", file.tempFile);
+
+        console.log(`[firefly] Successfully cleared TID from ${file.name}`);
+        results.push(`${file.name}: cleared successfully`);
+        anyModified = true;
+      } catch (error) {
+        console.error(`[firefly] Error processing ${file.name}:`, error);
+        results.push(`${file.name}: error - ${error}`);
+      }
+    }
+
+    const message = results.join("; ");
+    console.log(`[firefly] Clear TID summary: ${message}`);
+    return { success: true, modified: anyModified, message };
+  });
+
+  // --- Screenshot ---
+  ipcMain.handle("firefly:take-screenshot", async (_e, { serial }: { serial: string }) => {
+    try {
+      console.log(`[firefly] Taking screenshot for device ${serial}`);
+      
+      // Use exec to get raw binary data
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execPromise = promisify(exec);
+      
+      const adbPath = getAdbPath();
+      const command = `"${adbPath}" -s ${serial} exec-out screencap -p`;
+      
+      const { stdout, stderr } = await execPromise(command, { 
+        encoding: 'buffer',
+        maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large screenshots
+      });
+      
+      if (stderr && stderr.length > 0) {
+        console.error(`[firefly] Screenshot stderr: ${stderr.toString()}`);
+      }
+      
+      // Convert buffer to base64
+      const base64Image = stdout.toString('base64');
+      console.log(`[firefly] Screenshot captured successfully (${stdout.length} bytes, ${base64Image.length} base64 chars)`);
+      return base64Image;
+    } catch (error) {
+      console.error("Failed to take screenshot:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("firefly:save-screenshot", async (_e, { base64Data, deviceName }: { base64Data: string; deviceName: string }) => {
+    try {
+      // Generate filename with timestamp (HH-mm-ss format)
+      const now = new Date();
+      const timestamp = now.getHours().toString().padStart(2, '0') + '-' +
+                       now.getMinutes().toString().padStart(2, '0') + '-' +
+                       now.getSeconds().toString().padStart(2, '0');
+      const defaultName = `screenshot_${deviceName}_${timestamp}.png`;
+      
+      const result = await dialog.showSaveDialog({
+        title: "Save Screenshot",
+        defaultPath: defaultName,
+        filters: [
+          { name: "PNG Images", extensions: ["png"] }
+        ]
+      });
+      
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      
+      // Convert base64 to buffer and save
+      const buffer = Buffer.from(base64Data, 'base64');
+      await fs.writeFile(result.filePath, buffer);
+      
+      console.log(`[firefly] Screenshot saved to ${result.filePath}`);
+      return result.filePath;
+    } catch (error) {
+      console.error("Failed to save screenshot:", error);
+      throw error;
     }
   });
 

@@ -6,6 +6,8 @@ import TitleBar from "./components/TitleBar";
 import Configuration from "./components/Configuration";
 import Logcat from "./components/Logcat";
 import VideoGenerator from "./components/VideoGenerator";
+import ScreenshotDialog from "./components/ScreenshotDialog";
+import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
 import { Save, XCircle } from "lucide-react";
 
 declare global {
@@ -19,12 +21,16 @@ declare global {
       revealInFileManager: (p: string) => Promise<void>;
       openDefault: (p: string) => Promise<void>;
       openWith: (p: string) => Promise<void>;
+      getDefaultXmlEditor: () => Promise<string>;
       listDevices: () => Promise<Device[]>;
       getDeviceProps: (serial: string) => Promise<{ model: string; manufacturer: string; ipAddress: string | null; batteryLevel: number | null; isCharging: boolean; androidVersion: string | null }>;
       deleteOldCccFiles: (args: { pkg: string; serial: string }) => Promise<any>;
       pushAndReplace: (args: { localPath: string; pkg: string; relTarget: string; sdcardTemp: string; serial: string }) => Promise<{ how: string }>;
       restartApp: (pkg: string) => Promise<boolean>;
+      pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean }>;
+      clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; modified: boolean; message: string }>;
       launchScrcpy: (args: any) => Promise<boolean>;
+      openButterfly: () => Promise<boolean>;
       windowMinimize: () => Promise<void>;
       windowMaximize: () => Promise<void>;
       windowClose: () => Promise<void>;
@@ -96,6 +102,7 @@ export default function App() {
 
   const [xmlList, setXmlList] = React.useState<XmlItem[]>([]);
   const [selectedIdx, setSelectedIdx] = React.useState<number | null>(null);
+  const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<string>("");
   const [currentDir, setCurrentDir] = React.useState<string>("");
 
@@ -108,6 +115,7 @@ export default function App() {
 
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
+  const [showConfigSettings, setShowConfigSettings] = React.useState(false);
 
   // ADB and Scrcpy diagnostics state
   const [adbStatus, setAdbStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
@@ -128,6 +136,11 @@ export default function App() {
   const isMounted = React.useRef(true);
   const refreshingDevices = React.useRef(false);
   const [scrcpyLaunched, setScrcpyLaunched] = React.useState(false); // Track if scrcpy has been launched for current session
+  
+  // Screenshot state
+  const [takingScreenshot, setTakingScreenshot] = React.useState(false);
+  const [screenshotData, setScreenshotData] = React.useState<string | null>(null);
+  const [screenshotCopied, setScreenshotCopied] = React.useState(false);
   
   React.useEffect(() => {
     isMounted.current = true;
@@ -208,6 +221,9 @@ export default function App() {
     }
     
     await refreshDevices();
+    
+    // Dismiss splash screen immediately after first device refresh
+    handleLoadingComplete();
   }
 
 
@@ -319,6 +335,7 @@ export default function App() {
       if (!isMounted.current) return;
       setXmlList(list);
       setSelectedIdx(null);
+      setSelectedPath(null);
     } catch (e) {
       console.error("listXml failed:", e);
       if (!isMounted.current) return;
@@ -344,8 +361,16 @@ export default function App() {
 
   function navigateUp() {
     if (currentDir && currentDir !== dir3cxml) {
-      const parentDir = currentDir.split('/').slice(0, -1).join('/');
-      if (parentDir && parentDir.length >= dir3cxml.length) {
+      // Remove trailing slash if present
+      const normalizedPath = currentDir.endsWith('/') ? currentDir.slice(0, -1) : currentDir;
+      const pathParts = normalizedPath.split('/');
+      
+      // Remove the last part to go up one level
+      pathParts.pop();
+      const parentDir = pathParts.join('/');
+      
+      // If parent is within or equal to root, use it; otherwise fall back to root
+      if (parentDir && parentDir.startsWith(dir3cxml)) {
         setCurrentDir(parentDir);
       } else {
         setCurrentDir(dir3cxml);
@@ -381,6 +406,113 @@ export default function App() {
     }
   }
 
+  async function handleOpenButterfly() {
+    try {
+      const success = await window.firefly.openButterfly();
+      if (!success) {
+        console.error("Failed to open Butterfly");
+      }
+    } catch (e) {
+      console.error("Error opening Butterfly:", e);
+    }
+  }
+
+  async function handleTakeScreenshot() {
+    const serial = currentSerial();
+    if (!serial) {
+      return;
+    }
+
+    setTakingScreenshot(true);
+    try {
+      const base64Data = await window.firefly.takeScreenshot({ serial });
+      console.log(`[renderer] Received screenshot data: ${base64Data.substring(0, 100)}... (${base64Data.length} chars)`);
+      setScreenshotData(base64Data);
+      setScreenshotCopied(false); // Reset copied state on new capture
+    } catch (e) {
+      console.error("Failed to take screenshot:", e);
+      alert(`Failed to take screenshot: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setTakingScreenshot(false);
+    }
+  }
+
+  async function handleRecaptureScreenshot() {
+    const serial = currentSerial();
+    if (!serial) {
+      return;
+    }
+
+    setTakingScreenshot(true);
+    try {
+      const base64Data = await window.firefly.takeScreenshot({ serial });
+      console.log(`[renderer] Recaptured screenshot data: ${base64Data.substring(0, 100)}... (${base64Data.length} chars)`);
+      setScreenshotData(base64Data);
+      setScreenshotCopied(false); // Reset copied state
+    } catch (e) {
+      console.error("Failed to recapture screenshot:", e);
+      alert(`Failed to recapture screenshot: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setTakingScreenshot(false);
+    }
+  }
+
+  async function handleSaveScreenshot() {
+    if (!screenshotData) return;
+    
+    try {
+      const deviceName = deviceTitle.replace(/[^a-zA-Z0-9]/g, '_');
+      const filePath = await window.firefly.saveScreenshot({
+        base64Data: screenshotData,
+        deviceName,
+      });
+      
+      if (filePath) {
+        // Close dialog after successful save
+        setScreenshotData(null);
+        // Optionally reveal the file
+        await window.firefly.revealInFileManager(filePath);
+      }
+    } catch (e) {
+      console.error("Failed to save screenshot:", e);
+      alert(`Failed to save screenshot: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
+  async function handleCopyScreenshotToClipboard() {
+    if (!screenshotData) return;
+    
+    try {
+      // Convert base64 to Uint8Array using native APIs
+      const base64Data = screenshotData.replace(/^data:image\/\w+;base64,/, '');
+      
+      // Decode base64 to binary string
+      const binaryString = atob(base64Data);
+      
+      // Convert binary string to Uint8Array
+      const uint8Array = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        uint8Array[i] = binaryString.charCodeAt(i);
+      }
+      
+      // Create blob from Uint8Array
+      const blob = new Blob([uint8Array], { type: 'image/png' });
+      
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob })
+      ]);
+      
+      // Show success state
+      setScreenshotCopied(true);
+      
+      // Reset success state after 2 seconds
+      setTimeout(() => setScreenshotCopied(false), 2000);
+    } catch (e) {
+      console.error("Failed to copy to clipboard:", e);
+      alert(`Failed to copy to clipboard: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
   async function onSelectDeviceSerial(serial: string) {
     setSelectedSerial(serial);
     setDeviceMenuOpen(false);
@@ -409,34 +541,61 @@ export default function App() {
     }
   }
 
+  async function handleSaveConfigSettings(editorPath: string, clearTidFromDataStore: boolean) {
+    try {
+      await window.firefly.setConfig({ xml_editor_path: editorPath, clear_tid_from_datastore: clearTidFromDataStore });
+    } catch (e) {
+      console.error("Failed to save configuration settings:", e);
+      alert(`Failed to save settings: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
   async function onSend() {
     const serial = currentSerial();
-    if (!serial || selectedIdx == null) return;
+    if (!serial || !selectedPath) return;
 
-    const files = filteredXmlFiles();
-    const file = files[selectedIdx];
-    if (!file) return;
-
+    // selectedPath is the full path to the file, we can use it directly
     setBusy(true);
     setStatus("Sending…");
 
     try {
-      // 1. Delete old files
+      // 0. Get config to check if we should clear TID
+      const config = await window.firefly.getConfig();
+      
+      // 1. Clear TID from DataStore if enabled
+      if (config.clear_tid_from_datastore) {
+        setStatus("Clearing TID from DataStore…");
+        try {
+          const result = await window.firefly.clearTidFromDataStore({
+            pkg: TARGET_PACKAGE,
+            serial
+          });
+          console.log("Clear TID result:", result);
+        } catch (e: any) {
+          console.error("Failed to clear TID (continuing anyway):", e);
+          // Don't fail the entire operation if this fails
+        }
+      }
+
+      // 2. Delete old files
+      setStatus("Deleting old configuration…");
       await window.firefly.deleteOldCccFiles({ 
         pkg: TARGET_PACKAGE,
         serial 
       });
 
-      // 2. Push new config
+      // 3. Push new config
+      setStatus("Sending new configuration…");
       await window.firefly.pushAndReplace({
-        localPath: file.path,
+        localPath: selectedPath,
         pkg: TARGET_PACKAGE,
         relTarget: TARGET_XML_PATH,
         sdcardTemp: TEMP_XML_PATH,
         serial
       });
 
-      // 3. Restart the app
+      // 4. Restart the app
+      setStatus("Restarting terminal app…");
       const restartOk = await window.firefly.restartApp(TARGET_PACKAGE);
       if (!restartOk) {
         throw new Error("Failed to restart terminal app");
@@ -446,6 +605,44 @@ export default function App() {
     } catch (e: any) {
       setStatus(`Send failed: ${e.message || e}`);
       console.error("onSend failed:", e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGetConfigFromTerminal() {
+    const serial = currentSerial();
+    if (!serial) return;
+
+    setBusy(true);
+    setStatus("Downloading configuration from terminal…");
+
+    try {
+      // Use the current directory or root 3cxml folder as default save location
+      const baseDir = currentDir || dir3cxml || "";
+      const defaultSavePath = baseDir ? `${baseDir}/terminal-config.xml` : "terminal-config.xml";
+      
+      const result = await window.firefly.pullXmlFromDevice({
+        pkg: TARGET_PACKAGE,
+        relTarget: TARGET_XML_PATH,
+        serial,
+        defaultSavePath
+      });
+
+      if (result.canceled) {
+        setStatus("Download canceled");
+        return;
+      }
+
+      if (result.success && result.filePath) {
+        setStatus("Configuration downloaded successfully");
+        // Refresh the XML list to show the new file
+        await refreshXml();
+      }
+    } catch (e: any) {
+      setStatus(`Download failed: ${e.message || e}`);
+      console.error("handleGetConfigFromTerminal failed:", e);
+      alert(`Failed to download configuration:\n\n${e.message || e}`);
     } finally {
       setBusy(false);
     }
@@ -604,7 +801,7 @@ export default function App() {
       >
         <div
           className="w-full max-w-md p-6 rounded-2xl space-y-4"
-          style={{ background: "#1a2730", border: "1px solid rgba(255,255,255,0.1)" }}
+          style={{ background: "#08121A", border: "1px solid rgba(255,255,255,0.1)" }}
           onClick={e => e.stopPropagation()}
         >
           <h2 className="text-xl font-semibold text-white">Settings</h2>
@@ -620,7 +817,7 @@ export default function App() {
                         style={{ fontWeight: 500 }}>
                         {adbStatus.working ? <span>ADB working correctly</span> : <span>ADB needs configuration</span>}
                       </div>
-                      <div className="text-xs text-white/40 max-w-xs truncate" title={adbStatus.path}>Path: {adbStatus.path}</div>
+                      <div className="text-xs text-white/40 truncate" style={{ maxWidth: '200px' }} title={adbStatus.path}>Path: {adbStatus.path}</div>
                       {adbStatus.error && (
                         <div className="text-xs text-red-400 mt-1">{adbStatus.error}</div>
                       )}
@@ -661,7 +858,7 @@ export default function App() {
                         style={{ fontWeight: 500 }}>
                         {scrcpyStatus.working ? <span>Scrcpy working correctly</span> : <span>Scrcpy needs configuration</span>}
                       </div>
-                      <div className="text-xs text-white/40 max-w-xs truncate" title={scrcpyStatus.path}>Path: {scrcpyStatus.path}</div>
+                      <div className="text-xs text-white/40 truncate" style={{ maxWidth: '200px' }} title={scrcpyStatus.path}>Path: {scrcpyStatus.path}</div>
                       {scrcpyStatus.error && (
                         <div className="text-xs text-red-400 mt-1">{scrcpyStatus.error}</div>
                       )}
@@ -790,6 +987,7 @@ export default function App() {
         deviceMenuOpen={deviceMenuOpen}
         setDeviceMenuOpen={setDeviceMenuOpen}
         onSelectDeviceSerial={onSelectDeviceSerial}
+        refreshDevices={refreshDevices}
       />
       <div className="h-full flex" style={{ background: "#08121A", paddingTop: "32px" }}>
         <Sidebar
@@ -806,12 +1004,14 @@ export default function App() {
           currentSerial={currentSerial}
           launchScrcpy={handleLaunchScrcpy}
           scrcpyActive={scrcpyLaunched}
+          takeScreenshot={handleTakeScreenshot}
+          takingScreenshot={takingScreenshot}
+          openButterfly={handleOpenButterfly}
         />
 
         <main className="flex-1 flex flex-col overflow-hidden">
           {active === "configuration" && (
             <Configuration
-              status={status}
               busy={busy}
               dir3cxml={dir3cxml}
               currentDir={currentDir}
@@ -824,11 +1024,15 @@ export default function App() {
               setFilter={setFilter}
               selectedIdx={selectedIdx}
               setSelectedIdx={setSelectedIdx}
+              selectedPath={selectedPath}
+              setSelectedPath={setSelectedPath}
               filteredXml={filteredXml}
               filteredXmlFiles={filteredXmlFiles}
               refreshXml={refreshXml}
               currentSerial={currentSerial}
               onSend={onSend}
+              onGetConfigFromTerminal={handleGetConfigFromTerminal}
+              onOpenConfigSettings={() => setShowConfigSettings(true)}
             />
           )}
           {active === "logcat" && (
@@ -846,6 +1050,29 @@ export default function App() {
       </div>
 
       {showSettings && <SettingsDialog />}
+      {showConfigSettings && (
+        <ConfigurationSettingsDialog
+          onClose={() => setShowConfigSettings(false)}
+          onSave={handleSaveConfigSettings}
+          dir3cxml={dir3cxml}
+          onChooseDirectory={handleChooseDirectory}
+        />
+      )}
+      {screenshotData && (
+        <ScreenshotDialog
+          imageData={screenshotData}
+          deviceName={deviceTitle}
+          onClose={() => {
+            setScreenshotData(null);
+            setScreenshotCopied(false);
+          }}
+          onCopyToClipboard={handleCopyScreenshotToClipboard}
+          onSave={handleSaveScreenshot}
+          onRecapture={handleRecaptureScreenshot}
+          copied={screenshotCopied}
+          isCapturing={takingScreenshot}
+        />
+      )}
     </div>
   );
 }

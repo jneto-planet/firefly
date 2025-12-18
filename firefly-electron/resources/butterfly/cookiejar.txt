@@ -1,0 +1,6 @@
+#HttpOnly_localhost	FALSE	/	FALSE	0	state	
+#HttpOnly_localhost	FALSE	/	FALSE	0	client_id	1891211594
+#HttpOnly_localhost	FALSE	/	FALSE	0	code_challenge_method	S256
+#HttpOnly_localhost	FALSE	/	FALSE	0	redirect_uri	apiaccount://callback
+#HttpOnly_localhost	FALSE	/	FALSE	0	code_challenge	XiOte149CHlHw-cjf4XeI_f6zxdbAQKGl9JcuuYgKVk
+#HttpOnly_localhost	FALSE	/	FALSE	0	response_type	code

@@ -12,6 +12,7 @@ export type FireflyConfig = {
   custom_scrcpy_path?: string;
   polling_enabled?: boolean;
   polling_interval?: number;
+  xml_editor_path?: string;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -23,6 +24,7 @@ const DEFAULTS: FireflyConfig = {
   custom_scrcpy_path: "",
   polling_enabled: true,
   polling_interval: 2000,
+  xml_editor_path: "",
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");

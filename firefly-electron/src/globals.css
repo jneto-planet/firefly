@@ -4,3 +4,24 @@
 input[type="checkbox"] {
   accent-color: #FFD86A; /* Same golden yellow as button accent */
 }
+
+/* Add pointer cursor to all buttons */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Camera flash animation for screenshot button */
+@keyframes camera-flash {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+}
+
+.animate-camera-flash {
+  animation: camera-flash 0.6s ease-in-out;
+}

@@ -7,7 +7,10 @@ import {
   Terminal,
   Film,
   ScreenShare,
+  Camera,
 } from "lucide-react";
+import { PiButterflyLight } from "react-icons/pi";
+import { motion } from "framer-motion";
 
 import fireflylogo from "../assets/icons/firefly.png";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./Tooltip";
@@ -35,6 +38,13 @@ interface SidebarProps {
   // Scrcpy
   launchScrcpy: () => void;
   scrcpyActive: boolean;
+  
+  // Screenshot
+  takeScreenshot: () => void;
+  takingScreenshot: boolean;
+  
+  // Butterfly
+  openButterfly: () => void;
 }
 
 interface NavItemProps {
@@ -93,6 +103,9 @@ export default function Sidebar({
   currentSerial,
   launchScrcpy,
   scrcpyActive,
+  takeScreenshot,
+  takingScreenshot,
+  openButterfly,
 }: SidebarProps) {
   const serial = currentSerial();
   const currentOnline = serial != null;
@@ -131,7 +144,7 @@ export default function Sidebar({
               <div className="px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
                 <div className="flex items-center gap-2 mb-2 pb-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                   <div
-                    className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0"
                     style={{ background: "rgba(255,255,255,0.08)" }}
                   >
                     {deviceIcon
@@ -159,6 +172,14 @@ export default function Sidebar({
                       </span>
                     </div>
                   )}
+                  {deviceBatteryLevel === null && deviceIsCharging && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-[10px] text-white/40 uppercase tracking-wider">Power</span>
+                      <span className="text-[11px] text-white/80 text-right">
+                        ⚡
+                      </span>
+                    </div>
+                  )}
                   {deviceAndroidVersion && (
                     <div className="flex items-start justify-between">
                       <span className="text-[10px] text-white/40 uppercase tracking-wider">Android</span>
@@ -174,6 +195,107 @@ export default function Sidebar({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Quick Actions Section */}
+        <div>
+          <div className="px-3 py-1 mb-1">
+            <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Quick Actions</span>
+          </div>
+          <div className="px-2 flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={launchScrcpy}
+                  disabled={!currentOnline}
+                  className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                    scrcpyActive
+                      ? "bg-white/10"
+                      : currentOnline
+                      ? "bg-white/5"
+                      : "opacity-40 cursor-not-allowed"
+                  }`}
+                >
+                  <motion.div
+                    className="w-full h-full flex items-center justify-center"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.4, delay: 0.1 }}
+                    whileHover={currentOnline && !scrcpyActive ? { scale: [1, 1.15, 1, 1.15, 1] } : {}}
+                  >
+                    <ScreenShare
+                      className="h-4 w-4"
+                      color={scrcpyActive ? "#FFD86A" : "#fff"}
+                    />
+                  </motion.div>
+                  {scrcpyActive && (
+                    <span
+                      className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                      style={{ backgroundColor: "#FFD86A" }}
+                    />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Launch Scrcpy</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={takeScreenshot}
+                  disabled={!currentOnline || takingScreenshot}
+                  className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                    takingScreenshot
+                      ? "bg-white/10"
+                      : currentOnline
+                      ? "bg-white/5"
+                      : "opacity-40 cursor-not-allowed"
+                  }`}
+                >
+                  <motion.div
+                    className="w-full h-full flex items-center justify-center"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.4, delay: 0.2 }}
+                    whileHover={currentOnline && !takingScreenshot ? {
+                      scale: [1, 1.2, 1],
+                      filter: ["brightness(1)", "brightness(2)", "brightness(1)"]
+                    } : {}}
+                  >
+                    <Camera
+                      className="h-4 w-4"
+                      color={takingScreenshot ? "#FFD86A" : "#fff"}
+                    />
+                  </motion.div>
+                  {takingScreenshot && (
+                    <span
+                      className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                      style={{ backgroundColor: "#FFD86A" }}
+                    />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Take Screenshot</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={openButterfly}
+                  className="relative h-10 w-10 rounded-lg flex items-center justify-center bg-white/5"
+                >
+                  <motion.div
+                    className="w-full h-full flex items-center justify-center"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.4, delay: 0.3 }}
+                    whileHover={{ rotate: [0, -10, 10, -10, 10, 0] }}
+                  >
+                    <PiButterflyLight className="h-5 w-5" color="#fff" />
+                  </motion.div>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Open Butterfly</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
 
         {/* Actions Section */}
@@ -215,58 +337,20 @@ export default function Sidebar({
       </nav>
 
       {/* Bottom actions */}
-      <div className="p-3 mt-auto flex items-center justify-between">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
-            >
-              <Settings className="h-5 w-5" color="#fff" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Settings</TooltipContent>
-        </Tooltip>
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={launchScrcpy}
-                disabled={!currentOnline}
-                className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
-                  scrcpyActive
-                    ? "bg-white/10"
-                    : currentOnline
-                    ? "hover:bg-white/10"
-                    : "opacity-40 cursor-not-allowed"
-                }`}
-              >
-                <ScreenShare
-                  className="h-5 w-5"
-                  color={scrcpyActive ? "#FFD86A" : "#fff"}
-                />
-                {scrcpyActive && (
-                  <span
-                    className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
-                    style={{ backgroundColor: "#FFD86A" }}
-                  />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Launch Scrcpy</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={refreshDevices}
-                className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
-              >
-                <RefreshCcw className="h-5 w-5" color="#fff" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Refresh devices</TooltipContent>
-          </Tooltip>
-        </div>
+      <div className="p-3 mt-auto flex items-center justify-start">
+        <button
+          onClick={() => setShowSettings(true)}
+          className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
+          title="Settings"
+        >
+          <motion.div
+            className="w-full h-full flex items-center justify-center"
+            whileHover={{ rotate: 180 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Settings className="h-5 w-5" color="#fff" />
+          </motion.div>
+        </button>
       </div>
     </aside>
     </TooltipProvider>

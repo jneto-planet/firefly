@@ -1,5 +1,6 @@
 import React from "react";
-import { Minus, Square, X, Minimize2, ChevronDown, MonitorSmartphone } from "lucide-react";
+import { Minus, Square, X, Minimize2, ChevronDown, MonitorSmartphone, RefreshCcw } from "lucide-react";
+import { motion } from "framer-motion";
 
 // Extend CSS properties to include Electron-specific properties
 declare module 'react' {
@@ -22,6 +23,7 @@ interface TitleBarProps {
   deviceMenuOpen: boolean;
   setDeviceMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   onSelectDeviceSerial: (serial: string) => void;
+  refreshDevices: () => void;
 }
 
 export default function TitleBar({
@@ -32,6 +34,7 @@ export default function TitleBar({
   deviceMenuOpen,
   setDeviceMenuOpen,
   onSelectDeviceSerial,
+  refreshDevices,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = React.useState(false);
   const [isMacOS, setIsMacOS] = React.useState(false);
@@ -76,7 +79,7 @@ export default function TitleBar({
       <div className="flex-1"></div>
       
       {/* Center - Device Selector */}
-      <div className="relative" style={{ WebkitAppRegion: "no-drag" }}>
+      <div className="relative flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" }}>
         <button
           onClick={() => setDeviceMenuOpen(v => !v)}
           className="flex items-center gap-2 px-3 py-1 rounded hover:bg-white/5 transition-colors"
@@ -89,6 +92,21 @@ export default function TitleBar({
             )}
           </div>
           <ChevronDown className={`h-3 w-3 transition flex-shrink-0 ${deviceMenuOpen ? "rotate-180" : ""}`} color="#fff" />
+        </button>
+        
+        {/* Refresh button */}
+        <button
+          onClick={refreshDevices}
+          className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+          title="Refresh devices"
+        >
+          <motion.div
+            className="w-full h-full flex items-center justify-center"
+            whileHover={{ rotate: 180 }}
+            transition={{ duration: 0.3 }}
+          >
+            <RefreshCcw className="h-4 w-4" color="#fff" />
+          </motion.div>
         </button>
         
         {/* Device dropdown menu */}
