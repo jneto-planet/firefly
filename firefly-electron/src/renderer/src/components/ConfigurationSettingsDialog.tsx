@@ -35,7 +35,7 @@ export default function ConfigurationSettingsDialog({
       // Get custom editor path from config
       const config = await window.firefly.getConfig();
       setEditorPath(config.xml_editor_path || "");
-      setClearTidFromDataStore(config.clear_tid_from_datastore || false);
+      setClearTidFromDataStore(config.clear_tid_from_datastore ?? true);
     } catch (e) {
       console.error("Failed to load configuration settings:", e);
       setDefaultEditor("Error loading");

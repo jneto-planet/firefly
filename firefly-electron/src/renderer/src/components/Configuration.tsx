@@ -278,7 +278,7 @@ export default function Configuration({
                     <>
                       <span className="shrink-0">/</span>
                       <span className="truncate">
-                        {currentDir.replace(dir3cxml, '').split('/').filter(Boolean).join(' / ')}
+                        {currentDir.replace(dir3cxml, '').split(/[\/\\]/).filter(Boolean).join(' / ')}
                       </span>
                     </>
                   )}
