@@ -178,10 +178,10 @@ export function registerFireflyIpc() {
           const tmpFile = path.join(app.getPath('temp'), 'test.xml');
           await fs.writeFile(tmpFile, '<?xml version="1.0"?><root/>', 'utf-8');
           
-          const { stdout } = await execAsync(`mdls -name kMDItemContentType -name kMDItemKind "${tmpFile}"`);
+          const { stdout: _stdout } = await execAsync(`mdls -name kMDItemContentType -name kMDItemKind "${tmpFile}"`);
           
           // Try to get default app using open -Ra
-          const { stdout: appInfo } = await execAsync(`/usr/bin/osascript -e 'tell application "System Events" to get name of application file id (get id of application processes whose visible is true)'`).catch(() => ({ stdout: '' }));
+          const { stdout: _appInfo } = await execAsync(`/usr/bin/osascript -e 'tell application "System Events" to get name of application file id (get id of application processes whose visible is true)'`).catch(() => ({ stdout: '' }));
           
           // Cleanup temp file
           await fs.unlink(tmpFile).catch(() => {});

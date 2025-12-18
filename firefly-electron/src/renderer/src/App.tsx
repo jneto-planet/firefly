@@ -10,60 +10,6 @@ import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
 import { Save, XCircle } from "lucide-react";
 
-declare global {
-  interface Window {
-    firefly: {
-      getConfig: () => Promise<any>;
-      setConfig: (cfg: any) => Promise<any>;
-      pickDirectory: (initial?: string) => Promise<string | null>;
-      pickFile: (options?: { title?: string; defaultPath?: string; fileType?: 'executable' | 'any' }) => Promise<string | null>;
-      listXml: (dir: string) => Promise<{ name: string; path: string; type: 'file' | 'folder' }[]>;
-      revealInFileManager: (p: string) => Promise<void>;
-      openDefault: (p: string) => Promise<void>;
-      openWith: (p: string) => Promise<void>;
-      getDefaultXmlEditor: () => Promise<string>;
-      listDevices: () => Promise<Device[]>;
-      getDeviceProps: (serial: string) => Promise<{ model: string; manufacturer: string; ipAddress: string | null; batteryLevel: number | null; isCharging: boolean; androidVersion: string | null }>;
-      deleteOldCccFiles: (args: { pkg: string; serial: string }) => Promise<any>;
-      pushAndReplace: (args: { localPath: string; pkg: string; relTarget: string; sdcardTemp: string; serial: string }) => Promise<{ how: string }>;
-      restartApp: (pkg: string) => Promise<boolean>;
-      pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean }>;
-      clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; modified: boolean; message: string }>;
-      launchScrcpy: (args: any) => Promise<boolean>;
-      openButterfly: () => Promise<boolean>;
-      windowMinimize: () => Promise<void>;
-      windowMaximize: () => Promise<void>;
-      windowClose: () => Promise<void>;
-      windowIsMaximized: () => Promise<boolean>;
-      checkForUpdates: () => Promise<{ available: boolean; version: string | null; message?: string }>;
-      getAppVersion: () => Promise<string>;
-      installUpdate: () => Promise<void>;
-      testAdb: () => Promise<{ working: boolean; path: string; error?: string }>;
-      testScrcpy: (scrcpyPath: string) => Promise<{ working: boolean; path: string; error?: string }>;
-      detectScrcpy: () => Promise<{ working: boolean; path: string; error?: string }>;
-      setCustomAdbPath: (adbPath: string) => Promise<boolean>;
-      setCustomScrcpyPath: (scrcpyPath: string) => Promise<boolean>;
-      // Logcat methods
-      startLogcat: (args: { serial: string; packageName?: string }) => Promise<any>;
-      clearLogcat: (args: { serial: string }) => Promise<any>;
-      getLogcatSnapshot: (args: { serial: string; packageName?: string; maxLines?: number }) => Promise<{ success: boolean; logs?: string; error?: string }>;
-      // Video Generator methods
-      pickImages: () => Promise<string[]>;
-      pickSaveLocation: (defaultName: string) => Promise<string | null>;
-      generateVideo: (options: {
-        images: string[];
-        delay: number;
-        terminal: "PAX" | "VIPA";
-        width: number;
-        height: number;
-        outputPath: string;
-      }) => Promise<{ success: boolean; error?: string }>;
-      // Event listeners
-      onScrcpyClosed: (callback: (data: { serial: string }) => void) => () => void;
-    };
-  }
-}
-
 interface Device {
   serial: string;
   name: string;
@@ -314,10 +260,10 @@ export default function App() {
       const iconUrl = resolveDeviceIconByModelManu(props.model, props.manufacturer);
       console.log('[firefly] Device props received:', { model: props.model, manufacturer: props.manufacturer, ipAddress: props.ipAddress, battery: props.batteryLevel, charging: props.isCharging, android: props.androidVersion });
       setDeviceIcon(iconUrl || null);
-      setDeviceIpAddress(props.ipAddress);
-      setDeviceBatteryLevel(props.batteryLevel);
-      setDeviceIsCharging(props.isCharging);
-      setDeviceAndroidVersion(props.androidVersion);
+      setDeviceIpAddress(props.ipAddress ?? null);
+      setDeviceBatteryLevel(props.batteryLevel ?? null);
+      setDeviceIsCharging(props.isCharging ?? false);
+      setDeviceAndroidVersion(props.androidVersion ?? null);
     } catch {
       if (!isMounted.current) return;
       setDeviceIcon(null);

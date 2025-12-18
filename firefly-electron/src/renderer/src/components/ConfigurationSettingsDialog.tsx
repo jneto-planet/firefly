@@ -1,19 +1,6 @@
 import { XCircle, Save, FolderOpen, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
 
-declare global {
-  interface Window {
-    firefly: {
-      getConfig: () => Promise<any>;
-      setConfig: (cfg: any) => Promise<any>;
-      pickDirectory: (initial?: string) => Promise<string | null>;
-      pickFile: (options?: { title?: string; defaultPath?: string; fileType?: 'executable' | 'any' }) => Promise<string | null>;
-      getDefaultXmlEditor: () => Promise<string>;
-      revealInFileManager: (p: string) => Promise<void>;
-    };
-  }
-}
-
 interface ConfigurationSettingsDialogProps {
   onClose: () => void;
   onSave: (editorPath: string, clearTidFromDataStore: boolean) => void;

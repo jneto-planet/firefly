@@ -1,7 +1,6 @@
 import {
   ChevronRight,
   Settings,
-  RefreshCcw,
   MonitorSmartphone,
   Blocks,
   Terminal,
@@ -96,7 +95,7 @@ export default function Sidebar({
   deviceBatteryLevel,
   deviceIsCharging,
   deviceAndroidVersion,
-  refreshDevices,
+  refreshDevices: _refreshDevices,
   active,
   setActive,
   setShowSettings,
