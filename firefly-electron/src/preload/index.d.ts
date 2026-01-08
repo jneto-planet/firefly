@@ -14,6 +14,7 @@ declare global {
         clear_tid_from_datastore?: boolean;
         polling_enabled?: boolean;
         polling_interval?: number;
+        butterfly_path?: string;
       }>;
       setConfig: (cfg: Partial<{
         dir_3cxml: string;
@@ -24,6 +25,7 @@ declare global {
         clear_tid_from_datastore?: boolean;
         polling_enabled?: boolean;
         polling_interval?: number;
+        butterfly_path?: string;
       }>) => Promise<boolean>;
 
       // --- Files / XML ---

@@ -44,6 +44,7 @@ interface SidebarProps {
   
   // Butterfly
   openButterfly: () => void;
+  openingButterfly: boolean;
 }
 
 interface NavItemProps {
@@ -105,6 +106,7 @@ export default function Sidebar({
   takeScreenshot,
   takingScreenshot,
   openButterfly,
+  openingButterfly,
 }: SidebarProps) {
   const serial = currentSerial();
   const currentOnline = serial != null;
@@ -279,17 +281,28 @@ export default function Sidebar({
               <TooltipTrigger asChild>
                 <button
                   onClick={openButterfly}
-                  className="relative h-10 w-10 rounded-lg flex items-center justify-center bg-white/5"
+                  className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                    openingButterfly ? "bg-white/10" : "bg-white/5"
+                  }`}
                 >
                   <motion.div
                     className="w-full h-full flex items-center justify-center"
                     initial={{ scale: 0, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ duration: 0.4, delay: 0.3 }}
-                    whileHover={{ rotate: [0, -10, 10, -10, 10, 0] }}
+                    whileHover={!openingButterfly ? { rotate: [0, -10, 10, -10, 10, 0] } : {}}
                   >
-                    <PiButterflyLight className="h-5 w-5" color="#fff" />
+                    <PiButterflyLight 
+                      className="h-5 w-5" 
+                      color={openingButterfly ? "#FFD86A" : "#fff"} 
+                    />
                   </motion.div>
+                  {openingButterfly && (
+                    <span
+                      className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                      style={{ backgroundColor: "#FFD86A" }}
+                    />
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent>Open Butterfly</TooltipContent>

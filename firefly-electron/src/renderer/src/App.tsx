@@ -68,6 +68,7 @@ export default function App() {
   const [testingAdb, setTestingAdb] = React.useState<boolean>(false);
   const [scrcpyStatus, setScrcpyStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
   const [testingScrcpy, setTestingScrcpy] = React.useState<boolean>(false);
+  const [butterflyPath, setButterflyPath] = React.useState<string>("");
 
   // Version and update state
   const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
@@ -87,6 +88,9 @@ export default function App() {
   const [takingScreenshot, setTakingScreenshot] = React.useState(false);
   const [screenshotData, setScreenshotData] = React.useState<string | null>(null);
   const [screenshotCopied, setScreenshotCopied] = React.useState(false);
+  
+  // Butterfly state
+  const [openingButterfly, setOpeningButterfly] = React.useState(false);
   
   React.useEffect(() => {
     isMounted.current = true;
@@ -354,12 +358,16 @@ export default function App() {
 
   async function handleOpenButterfly() {
     try {
+      setOpeningButterfly(true);
       const success = await window.firefly.openButterfly();
       if (!success) {
         console.error("Failed to open Butterfly");
       }
+      // Keep feedback for 2 seconds
+      setTimeout(() => setOpeningButterfly(false), 2000);
     } catch (e) {
       console.error("Error opening Butterfly:", e);
+      setOpeningButterfly(false);
     }
   }
 
@@ -675,6 +683,9 @@ export default function App() {
         configUpdates.polling_enabled = pollingEnabled;
         configUpdates.polling_interval = pollingInterval;
         
+        // Save butterfly path
+        configUpdates.butterfly_path = butterflyPath;
+        
         await window.firefly.setConfig(configUpdates);
         setShowSettings(false);
         await refreshDevices();
@@ -730,6 +741,20 @@ export default function App() {
         }
       } catch (e) { 
         console.error("pickFile adb failed:", e);
+        alert(`Failed to open file picker: ${e}`);
+      }
+    }
+
+    async function browseButterfly() {
+      try {
+        const path = await window.firefly.pickFile({
+          title: "Select Butterfly Script",
+          fileType: "any",
+        });
+        if (path) {
+          setButterflyPath(path);
+        }
+      } catch (e) {
         alert(`Failed to open file picker: ${e}`);
       }
     }
@@ -834,6 +859,23 @@ export default function App() {
                     Select...
                   </button>
                 </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">Butterfly Path</div>
+                  <div className="text-xs text-white/60">Custom Butterfly script (leave empty for bundled)</div>
+                  {butterflyPath && (
+                    <div className="text-xs text-white/40 truncate" style={{ maxWidth: '200px' }} title={butterflyPath}>Path: {butterflyPath}</div>
+                  )}
+                </div>
+                <button
+                  onClick={browseButterfly}
+                  className="px-3 py-1 text-xs rounded border"
+                  style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
+                >
+                  Select...
+                </button>
               </div>
 
               <div className="flex items-center justify-between mb-4">
@@ -953,6 +995,7 @@ export default function App() {
           takeScreenshot={handleTakeScreenshot}
           takingScreenshot={takingScreenshot}
           openButterfly={handleOpenButterfly}
+          openingButterfly={openingButterfly}
         />
 
         <main className="flex-1 flex flex-col overflow-hidden">

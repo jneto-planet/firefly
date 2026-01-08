@@ -13,6 +13,7 @@ export type FireflyConfig = {
   polling_enabled?: boolean;
   polling_interval?: number;
   xml_editor_path?: string;
+  butterfly_path?: string;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -25,6 +26,7 @@ const DEFAULTS: FireflyConfig = {
   polling_enabled: true,
   polling_interval: 2000,
   xml_editor_path: "",
+  butterfly_path: "",
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");

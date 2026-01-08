@@ -288,23 +288,43 @@ export default function Configuration({
             </div>
             
             {dir3cxml && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={refreshXml}
-                    className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10 shrink-0"
-                  >
-                    <motion.div
-                      className="w-full h-full flex items-center justify-center"
-                      whileHover={{ rotate: 180 }}
-                      transition={{ duration: 0.3 }}
+              <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => window.firefly.revealInFileManager(currentDir)}
+                      className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10 shrink-0"
                     >
-                      <RefreshCcw className="h-4 w-4" color="#fff" />
-                    </motion.div>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Refresh templates</TooltipContent>
-              </Tooltip>
+                      <motion.div
+                        className="w-full h-full flex items-center justify-center"
+                        whileHover={{ scale: 1.2 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <Eye className="h-4 w-4" color="#fff" />
+                      </motion.div>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open in file explorer</TooltipContent>
+                </Tooltip>
+                
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={refreshXml}
+                      className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10 shrink-0"
+                    >
+                      <motion.div
+                        className="w-full h-full flex items-center justify-center"
+                        whileHover={{ rotate: 180 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        <RefreshCcw className="h-4 w-4" color="#fff" />
+                      </motion.div>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Refresh folders</TooltipContent>
+                </Tooltip>
+              </div>
             )}
           </div>
 

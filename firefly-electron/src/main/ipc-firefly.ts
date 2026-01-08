@@ -533,13 +533,20 @@ export function registerFireflyIpc() {
 
   ipcMain.handle("firefly:open-butterfly", async () => {
     try {
-      const scriptPath = getButterflyScriptPath();
+      // Check if user has configured a custom Butterfly path
+      const config = await loadConfig();
+      let scriptPath = config.butterfly_path;
+      
+      // If no custom path, use bundled version
+      if (!scriptPath || scriptPath.trim() === "") {
+        scriptPath = getButterflyScriptPath();
+      }
       
       if (!scriptPath) {
         console.error("[firefly] Butterfly script not found");
         dialog.showErrorBox(
           "Butterfly Not Found",
-          "The Butterfly application could not be found. Please ensure it is properly installed."
+          "The Butterfly application could not be found. Please configure the Butterfly path in settings or ensure the bundled version is properly installed."
         );
         return false;
       }
