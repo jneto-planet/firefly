@@ -428,13 +428,24 @@ export function registerFireflyIpc() {
       throw new Error(`Target directory does not exist: files/appconfig/cccterminal/3cixml. Will not create new directories.`);
     }
     
-    // Step 3: Copy file to replace existing XML (DO NOT CREATE NEW DIRS)
-    r = await adbs(serial, "shell", "run-as", pkg, "cp", sdcardTemp, relativeTarget);
-    console.log(`[firefly] Copy with run-as result: code=${r.code}, out="${r.out}", err="${r.err}"`);
+    // Step 3: Copy file to replace existing XML
+    // Use cat + redirect instead of cp to work around Android 12+ SELinux restrictions
+    // that prevent run-as from copying files from world-readable locations like /sdcard
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execPromise = promisify(exec);
+    const adbPath = getAdbPath();
     
-    if (r.code !== 0) {
+    // Use shell command: cat temp_file | run-as pkg sh -c 'cat > target_file'
+    const copyCommand = `"${adbPath}" -s ${serial} shell "cat ${sdcardTemp} | run-as ${pkg} sh -c 'cat > ${relativeTarget}'"`;
+    console.log(`[firefly] Executing copy command for Android 12+ compatibility`);
+    
+    try {
+      await execPromise(copyCommand);
+      console.log(`[firefly] File copied successfully using cat redirect method`);
+    } catch (error: any) {
       await adbs(serial, "shell", "rm", sdcardTemp); // cleanup temp file
-      throw new Error(`Failed to copy XML file: ${r.err || "Unknown error"}. Target path may not be accessible.`);
+      throw new Error(`Failed to copy XML file: ${error.message || "Unknown error"}. Target path may not be accessible.`);
     }
 
     // Step 4: Set proper permissions on the XML file
@@ -535,7 +546,7 @@ export function registerFireflyIpc() {
     try {
       // Check if user has configured a custom Butterfly path
       const config = await loadConfig();
-      let scriptPath = config.butterfly_path;
+      let scriptPath: string | null | undefined = config.butterfly_path;
       
       // If no custom path, use bundled version
       if (!scriptPath || scriptPath.trim() === "") {
@@ -651,12 +662,16 @@ export function registerFireflyIpc() {
         await execPromise(`"${adbPath}" -s ${serial} shell "echo '${escapedContent}' > ${file.tempFile}"`);
         
         // Step 4: Copy temp file to target location
-        r = await adbs(serial, "shell", "run-as", pkg, "cp", file.tempFile, file.path);
-        console.log(`[firefly] Copy filtered ${file.name} file result: code=${r.code}`);
+        // Use cat + redirect instead of cp to work around Android 12+ SELinux restrictions
+        const copyCommand = `"${adbPath}" -s ${serial} shell "cat ${file.tempFile} | run-as ${pkg} sh -c 'cat > ${file.path}'"`;
+        console.log(`[firefly] Copying filtered ${file.name} file using cat redirect for Android 12+ compatibility`);
         
-        if (r.code !== 0) {
+        try {
+          await execPromise(copyCommand);
+          console.log(`[firefly] Copy filtered ${file.name} file succeeded`);
+        } catch (error: any) {
           await adbs(serial, "shell", "rm", file.tempFile); // cleanup
-          console.error(`[firefly] Failed to copy filtered ${file.name} file: ${r.err}`);
+          console.error(`[firefly] Failed to copy filtered ${file.name} file: ${error.message}`);
           results.push(`${file.name}: failed to update`);
           continue;
         }
