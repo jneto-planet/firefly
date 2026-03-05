@@ -58,6 +58,9 @@ declare global {
       openButterfly: () => Promise<boolean>;
       takeScreenshot: (args: { serial: string }) => Promise<string>;
       saveScreenshot: (args: { base64Data: string; deviceName: string }) => Promise<string | null>;
+      startScreenRecording: (args: { serial: string }) => Promise<{ success: boolean; recordingPath?: string; message?: string }>;
+      stopScreenRecording: (args: { serial: string; recordingPath: string }) => Promise<{ success: boolean; filePath?: string; message?: string; canceled?: boolean }>;
+      isRecording: (args: { serial: string }) => Promise<boolean>;
 
       // --- Window Controls ---
       windowMinimize: () => Promise<void>;

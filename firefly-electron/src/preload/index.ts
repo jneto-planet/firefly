@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld("firefly", {
   openButterfly: () => ipcRenderer.invoke("firefly:open-butterfly"),
   takeScreenshot: (args: { serial: string }) => ipcRenderer.invoke("firefly:take-screenshot", args),
   saveScreenshot: (args: { base64Data: string; deviceName: string }) => ipcRenderer.invoke("firefly:save-screenshot", args),
+  startScreenRecording: (args: { serial: string }) => ipcRenderer.invoke("firefly:start-screen-recording", args),
+  stopScreenRecording: (args: { serial: string; recordingPath: string }) => ipcRenderer.invoke("firefly:stop-screen-recording", args),
+  isRecording: (args: { serial: string }) => ipcRenderer.invoke("firefly:is-recording", args),
 
     windowMinimize: () => ipcRenderer.invoke("firefly:window-minimize"),
     windowMaximize: () => ipcRenderer.invoke("firefly:window-maximize"),

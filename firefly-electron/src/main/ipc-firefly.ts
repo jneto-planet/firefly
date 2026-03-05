@@ -5,7 +5,10 @@ import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
 import { autoUpdater } from "electron-updater";
 import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy, getAdbPath } from "./adb";
-import { spawn } from "node:child_process";
+import { spawn, ChildProcess } from "node:child_process";
+
+// Track active screen recordings
+const activeRecordings = new Map<string, ChildProcess>();
 
 /**
  * Get the path to the bundled Butterfly script
@@ -759,6 +762,119 @@ export function registerFireflyIpc() {
       console.error("Failed to save screenshot:", error);
       throw error;
     }
+  });
+
+  // --- Screen Recording ---
+  ipcMain.handle("firefly:start-screen-recording", async (_e, { serial }: { serial: string }) => {
+    try {
+      console.log(`[firefly] Starting screen recording for device ${serial}`);
+      
+      // Check if already recording
+      if (activeRecordings.has(serial)) {
+        console.warn(`[firefly] Recording already in progress for device ${serial}`);
+        return { success: false, message: "Recording already in progress" };
+      }
+      
+      const adbPath = getAdbPath();
+      const recordingPath = `/sdcard/firefly_recording_${Date.now()}.mp4`;
+      
+      // Start screenrecord process
+      // Note: Android screenrecord has a max time of 180 seconds (3 minutes) by default
+      const recordProcess = spawn(adbPath, ["-s", serial, "shell", "screenrecord", recordingPath], {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      
+      activeRecordings.set(serial, recordProcess);
+      
+      recordProcess.on('error', (error) => {
+        console.error(`[firefly] Screen recording process error:`, error);
+        activeRecordings.delete(serial);
+      });
+      
+      recordProcess.on('exit', (code) => {
+        console.log(`[firefly] Screen recording process exited with code ${code}`);
+        activeRecordings.delete(serial);
+      });
+      
+      console.log(`[firefly] Screen recording started: ${recordingPath}`);
+      return { success: true, recordingPath };
+    } catch (error) {
+      console.error("Failed to start screen recording:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("firefly:stop-screen-recording", async (_e, { serial, recordingPath }: { serial: string; recordingPath: string }) => {
+    try {
+      console.log(`[firefly] Stopping screen recording for device ${serial}`);
+      
+      const recordProcess = activeRecordings.get(serial);
+      if (!recordProcess) {
+        console.warn(`[firefly] No active recording found for device ${serial}`);
+        return { success: false, message: "No active recording found" };
+      }
+      
+      // Stop the recording by killing the process
+      recordProcess.kill('SIGINT');
+      
+      // Wait a bit for the file to be finalized
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Remove from active recordings
+      activeRecordings.delete(serial);
+      
+      // Show save dialog
+      const now = new Date();
+      const timestamp = now.getHours().toString().padStart(2, '0') + '-' +
+                       now.getMinutes().toString().padStart(2, '0') + '-' +
+                       now.getSeconds().toString().padStart(2, '0');
+      const defaultName = `screen_recording_${timestamp}.mp4`;
+      
+      const result = await dialog.showSaveDialog({
+        title: "Save Screen Recording",
+        defaultPath: defaultName,
+        filters: [
+          { name: "MP4 Videos", extensions: ["mp4"] }
+        ]
+      });
+      
+      if (result.canceled || !result.filePath) {
+        // Clean up the recording file on device
+        await adbs(serial, "shell", "rm", recordingPath);
+        return { success: false, message: "Save canceled", canceled: true };
+      }
+      
+      // Pull the recording from the device
+      console.log(`[firefly] Pulling recording from device: ${recordingPath}`);
+      const pullResult = await adbs(serial, "pull", recordingPath, result.filePath);
+      
+      if (pullResult.code !== 0) {
+        console.error(`[firefly] Failed to pull recording: ${pullResult.err}`);
+        throw new Error(`Failed to pull recording: ${pullResult.err}`);
+      }
+      
+      // Clean up the recording file on device
+      await adbs(serial, "shell", "rm", recordingPath);
+      
+      console.log(`[firefly] Screen recording saved to ${result.filePath}`);
+      return { success: true, filePath: result.filePath };
+    } catch (error) {
+      console.error("Failed to stop screen recording:", error);
+      // Try to clean up
+      activeRecordings.delete(serial);
+      if (recordingPath) {
+        try {
+          await adbs(serial, "shell", "rm", recordingPath);
+        } catch (e) {
+          console.error("Failed to clean up recording file:", e);
+        }
+      }
+      throw error;
+    }
+  });
+
+  ipcMain.handle("firefly:is-recording", async (_e, { serial }: { serial: string }) => {
+    return activeRecordings.has(serial);
   });
 
   // --- Window Controls ---

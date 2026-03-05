@@ -7,6 +7,7 @@ import {
   Film,
   ScreenShare,
   Camera,
+  Video,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
 import { motion } from "framer-motion";
@@ -45,6 +46,11 @@ interface SidebarProps {
   // Butterfly
   openButterfly: () => void;
   openingButterfly: boolean;
+  
+  // Screen Recording
+  toggleScreenRecording: () => void;
+  isRecording: boolean;
+  recordingSeconds: number;
 }
 
 interface NavItemProps {
@@ -107,9 +113,19 @@ export default function Sidebar({
   takingScreenshot,
   openButterfly,
   openingButterfly,
+  toggleScreenRecording,
+  isRecording,
+  recordingSeconds,
 }: SidebarProps) {
   const serial = currentSerial();
   const currentOnline = serial != null;
+
+  // Format recording time as MM:SS
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <TooltipProvider delayDuration={500}>
@@ -276,6 +292,53 @@ export default function Sidebar({
                 </button>
               </TooltipTrigger>
               <TooltipContent>Take Screenshot</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="relative">
+                  <button
+                    onClick={toggleScreenRecording}
+                    disabled={!currentOnline && !isRecording}
+                    className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                      isRecording
+                        ? "bg-white/10"
+                        : currentOnline
+                        ? "bg-white/5"
+                        : "opacity-40 cursor-not-allowed"
+                    }`}
+                  >
+                    <motion.div
+                      className="w-full h-full flex items-center justify-center"
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.4, delay: 0.25 }}
+                      whileHover={currentOnline && !isRecording ? {
+                        scale: [1, 1.1, 1],
+                      } : {}}
+                    >
+                      <Video
+                        className="h-4 w-4"
+                        color={isRecording ? "#FFD86A" : "#fff"}
+                      />
+                    </motion.div>
+                    {isRecording && (
+                      <span
+                        className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                        style={{ backgroundColor: "#FF4444" }}
+                      />
+                    )}
+                  </button>
+                  {isRecording && (
+                    <div 
+                      className="absolute -bottom-5 left-1/2 transform -translate-x-1/2 text-[10px] font-mono whitespace-nowrap"
+                      style={{ color: "#FFD86A" }}
+                    >
+                      {formatRecordingTime(recordingSeconds)}
+                    </div>
+                  )}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>{isRecording ? "Stop Recording" : "Screen Recording"}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>

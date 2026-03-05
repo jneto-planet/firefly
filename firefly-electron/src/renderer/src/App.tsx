@@ -92,6 +92,12 @@ export default function App() {
   // Butterfly state
   const [openingButterfly, setOpeningButterfly] = React.useState(false);
   
+  // Screen Recording state
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [recordingPath, setRecordingPath] = React.useState<string | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = React.useState(0);
+  const recordingStartTimeRef = React.useRef<number | null>(null);
+  
   React.useEffect(() => {
     isMounted.current = true;
     boot();
@@ -108,6 +114,18 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Timer effect for recording
+  React.useEffect(() => {
+    if (isRecording && recordingStartTimeRef.current) {
+      const interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current!) / 1000);
+        setRecordingSeconds(elapsed);
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [isRecording]);
 
   // Auto-refresh devices based on polling config
   React.useEffect(() => {
@@ -464,6 +482,62 @@ export default function App() {
     } catch (e) {
       console.error("Failed to copy to clipboard:", e);
       alert(`Failed to copy to clipboard: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
+  async function handleToggleScreenRecording() {
+    const serial = currentSerial();
+    if (!serial) {
+      return;
+    }
+
+    if (isRecording) {
+      // Stop recording
+      if (!recordingPath) {
+        console.error("No recording path found");
+        return;
+      }
+
+      // Immediately stop the timer and update UI
+      setIsRecording(false);
+      recordingStartTimeRef.current = null;
+
+      try {
+        const result = await window.firefly.stopScreenRecording({ serial, recordingPath });
+        
+        if (result.success && result.filePath) {
+          console.log(`[renderer] Screen recording saved to ${result.filePath}`);
+          // Optionally reveal the file
+          await window.firefly.revealInFileManager(result.filePath);
+        } else if (result.canceled) {
+          console.log(`[renderer] Screen recording save was canceled`);
+        }
+      } catch (e) {
+        console.error("Failed to stop screen recording:", e);
+        alert(`Failed to stop screen recording: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      } finally {
+        // Clean up remaining state
+        setRecordingPath(null);
+        setRecordingSeconds(0);
+      }
+    } else {
+      // Start recording
+      try {
+        const result = await window.firefly.startScreenRecording({ serial });
+        
+        if (result.success && result.recordingPath) {
+          console.log(`[renderer] Screen recording started: ${result.recordingPath}`);
+          setIsRecording(true);
+          setRecordingPath(result.recordingPath);
+          setRecordingSeconds(0);
+          recordingStartTimeRef.current = Date.now();
+        } else {
+          alert(`Failed to start screen recording: ${result.message || 'Unknown error'}`);
+        }
+      } catch (e) {
+        console.error("Failed to start screen recording:", e);
+        alert(`Failed to start screen recording: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      }
     }
   }
 
@@ -996,6 +1070,9 @@ export default function App() {
           takingScreenshot={takingScreenshot}
           openButterfly={handleOpenButterfly}
           openingButterfly={openingButterfly}
+          toggleScreenRecording={handleToggleScreenRecording}
+          isRecording={isRecording}
+          recordingSeconds={recordingSeconds}
         />
 
         <main className="flex-1 flex flex-col overflow-hidden">
