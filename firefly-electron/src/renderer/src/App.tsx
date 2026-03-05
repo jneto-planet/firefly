@@ -125,6 +125,7 @@ export default function App() {
       
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isRecording]);
 
   // Auto-refresh devices based on polling config
