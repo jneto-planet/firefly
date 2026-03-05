@@ -778,9 +778,10 @@ export function registerFireflyIpc() {
       const adbPath = getAdbPath();
       const recordingPath = `/sdcard/firefly_recording_${Date.now()}.mp4`;
       
-      // Start screenrecord process
-      // Note: Android screenrecord has a max time of 180 seconds (3 minutes) by default
-      const recordProcess = spawn(adbPath, ["-s", serial, "shell", "screenrecord", recordingPath], {
+      // Start screenrecord process with extended time limit
+      // Setting time limit to 1800 seconds (30 minutes) - much longer than default 180s
+      // User can stop manually at any time before the limit
+      const recordProcess = spawn(adbPath, ["-s", serial, "shell", "screenrecord", "--time-limit", "1800", recordingPath], {
         stdio: ['ignore', 'pipe', 'pipe']
       });
       
