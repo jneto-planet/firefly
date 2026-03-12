@@ -1,2 +1,0 @@
-JAVA_VERSION="23.0.2"
-MODULES="java.base java.datatransfer java.xml java.prefs java.desktop java.logging java.security.sasl java.naming java.net.http java.security.jgss java.transaction.xa java.sql jdk.crypto.cryptoki jdk.crypto.ec jdk.httpserver"

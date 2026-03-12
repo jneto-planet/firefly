@@ -14,6 +14,12 @@ export type FireflyConfig = {
   polling_interval?: number;
   xml_editor_path?: string;
   butterfly_path?: string;
+  logger_client_path?: string;
+  logger_client_send_params?: boolean;
+  recording_bit_rate?: number;
+  recording_resolution?: number;
+  recording_show_taps?: boolean;
+  recording_save_path?: string;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -27,6 +33,12 @@ const DEFAULTS: FireflyConfig = {
   polling_interval: 2000,
   xml_editor_path: "",
   butterfly_path: "",
+  logger_client_path: "",
+  logger_client_send_params: true,
+  recording_bit_rate: 4,
+  recording_resolution: 100,
+  recording_show_taps: true,
+  recording_save_path: "",
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");

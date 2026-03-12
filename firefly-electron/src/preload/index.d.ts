@@ -15,6 +15,12 @@ declare global {
         polling_enabled?: boolean;
         polling_interval?: number;
         butterfly_path?: string;
+        logger_client_path?: string;
+        logger_client_send_params?: boolean;
+        recording_bit_rate?: number;
+        recording_resolution?: number;
+        recording_show_taps?: boolean;
+        recording_save_path?: string;
       }>;
       setConfig: (cfg: Partial<{
         dir_3cxml: string;
@@ -26,6 +32,12 @@ declare global {
         polling_enabled?: boolean;
         polling_interval?: number;
         butterfly_path?: string;
+        logger_client_path?: string;
+        logger_client_send_params?: boolean;
+        recording_bit_rate?: number;
+        recording_resolution?: number;
+        recording_show_taps?: boolean;
+        recording_save_path?: string;
       }>) => Promise<boolean>;
 
       // --- Files / XML ---
@@ -51,14 +63,15 @@ declare global {
       }>;
       deleteOldCccFiles: (args: any) => Promise<any>;
       pushAndReplace: (args: any) => Promise<{ how: string }>;
-      restartApp: (pkg: string) => Promise<boolean>;
+      restartApp: (args: { pkg: string; serial: string }) => Promise<boolean>;
       pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; message: string; savePath?: string; filePath?: string; canceled?: boolean }>;
       clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; message: string }>;
       launchScrcpy: (args: any) => Promise<boolean>;
       openButterfly: () => Promise<boolean>;
+      openLoggerClient: (args?: { ip?: string; port?: string; pattern?: string }) => Promise<boolean>;
       takeScreenshot: (args: { serial: string }) => Promise<string>;
       saveScreenshot: (args: { base64Data: string; deviceName: string }) => Promise<string | null>;
-      startScreenRecording: (args: { serial: string }) => Promise<{ success: boolean; recordingPath?: string; message?: string }>;
+      startScreenRecording: (args: { serial: string; bitRate: number; resolution: number; showTaps: boolean }) => Promise<{ success: boolean; recordingPath?: string; sdkVersion?: number; timeLimitInfo?: string; message?: string }>;
       stopScreenRecording: (args: { serial: string; recordingPath: string }) => Promise<{ success: boolean; filePath?: string; message?: string; canceled?: boolean }>;
       isRecording: (args: { serial: string }) => Promise<boolean>;
 

@@ -134,6 +134,27 @@ export const adb  = (...args: string[]) => runAsync(getAdbPath(), args);
 export const adbs = (serial: string, ...args: string[]) => runAsync(getAdbPath(), ["-s", serial, ...args]);
 export { getAdbPath };
 
+/**
+ * Restart an app on a specific device.
+ * @param serial - The device serial (required when multiple devices are connected)
+ * @param pkg    - The package name to force-stop and relaunch
+ */
+export async function restartApp(serial: string, pkg: string): Promise<boolean> {
+  console.log(`[firefly] Restarting app: ${pkg} on device ${serial}`);
+
+  let r = await adbs(serial, "shell", "am", "force-stop", pkg);
+  console.log(`[firefly] Force-stop result: code=${r.code}, err="${r.err}"`);
+
+  r = await adbs(serial, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1");
+  console.log(`[firefly] Start app result: code=${r.code}, err="${r.err}"`);
+
+  if (r.code !== 0) {
+    console.warn(`[firefly] App restart had non-zero exit, but continuing...`);
+  }
+
+  return true;
+}
+
 // Test if ADB is working
 export async function testAdb(): Promise<{ working: boolean; path: string; error?: string }> {
   const adbPath = getAdbPath();

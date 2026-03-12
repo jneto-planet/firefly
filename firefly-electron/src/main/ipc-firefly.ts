@@ -3,48 +3,13 @@ import { ipcMain, BrowserWindow, dialog, shell, app } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, saveConfig } from "./config";
+import { buildLoggerClientArgs } from "./logger-client";
 import { autoUpdater } from "electron-updater";
-import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy, getAdbPath } from "./adb";
+import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy, getAdbPath, restartApp } from "./adb";
 import { spawn, ChildProcess } from "node:child_process";
 
 // Track active screen recordings
 const activeRecordings = new Map<string, ChildProcess>();
-
-/**
- * Get the path to the bundled Butterfly script
- */
-function getButterflyScriptPath(): string | null {
-  const platform = process.platform;
-  const isDev = !app.isPackaged;
-
-  if (isDev) {
-    // In development, look in resources folder
-    const devPath = path.join(app.getAppPath(), "resources", "butterfly");
-    const script = platform === "win32" ? "Butterfly.bat" : "Butterfly.sh";
-    const scriptPath = path.join(devPath, script);
-    if (require("fs").existsSync(scriptPath)) {
-      return scriptPath;
-    }
-    return null;
-  }
-
-  // In production, use bundled Butterfly
-  const resourcesPath = process.resourcesPath;
-  
-  if (platform === "darwin") {
-    const scriptPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "butterfly", "Butterfly.sh");
-    if (require("fs").existsSync(scriptPath)) {
-      return scriptPath;
-    }
-  } else if (platform === "win32") {
-    const scriptPath = path.join(resourcesPath, "app.asar.unpacked", "resources", "butterfly", "Butterfly.bat");
-    if (require("fs").existsSync(scriptPath)) {
-      return scriptPath;
-    }
-  }
-  
-  return null;
-}
 
 /**
  * Get the path to the bundled ffmpeg executable
@@ -460,22 +425,8 @@ export function registerFireflyIpc() {
     return { how: "replaced" };
   });
 
-  ipcMain.handle("firefly:restart", async (_e, pkg: string) => {
-    console.log(`[firefly] Restarting app: ${pkg}`);
-    
-    // Force stop the app
-    let r = await adb("shell", "am", "force-stop", pkg);
-    console.log(`[firefly] Force-stop result: code=${r.code}, out="${r.out}", err="${r.err}"`);
-    
-    // Start the app again
-    r = await adb("shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1");
-    console.log(`[firefly] Start app result: code=${r.code}, out="${r.out}", err="${r.err}"`);
-    
-    if (r.code !== 0) {
-      console.warn(`[firefly] App restart had non-zero exit, but continuing...`);
-    }
-    
-    return true;
+  ipcMain.handle("firefly:restart", async (_e, { pkg, serial }: { pkg: string; serial: string }) => {
+    return restartApp(serial, pkg);
   });
 
   // --- Pull XML from Device ---
@@ -547,20 +498,14 @@ export function registerFireflyIpc() {
 
   ipcMain.handle("firefly:open-butterfly", async () => {
     try {
-      // Check if user has configured a custom Butterfly path
       const config = await loadConfig();
-      let scriptPath: string | null | undefined = config.butterfly_path;
-      
-      // If no custom path, use bundled version
-      if (!scriptPath || scriptPath.trim() === "") {
-        scriptPath = getButterflyScriptPath();
-      }
-      
+      const scriptPath = config.butterfly_path?.trim();
+
       if (!scriptPath) {
-        console.error("[firefly] Butterfly script not found");
+        console.error("[firefly] Butterfly path not configured");
         dialog.showErrorBox(
-          "Butterfly Not Found",
-          "The Butterfly application could not be found. Please configure the Butterfly path in settings or ensure the bundled version is properly installed."
+          "Butterfly Not Configured",
+          "No Butterfly path has been set. Please configure it in Settings."
         );
         return false;
       }
@@ -597,6 +542,33 @@ export function registerFireflyIpc() {
       dialog.showErrorBox(
         "Failed to Launch Butterfly",
         `An error occurred while launching Butterfly: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    }
+  });
+
+  // --- Open Logger Client ---
+  ipcMain.handle("firefly:open-logger-client", async (_e, args?: { ip?: string; port?: string; pattern?: string }) => {
+    const config = await loadConfig();
+    const execPath = config.logger_client_path?.trim();
+    if (!execPath) {
+      dialog.showErrorBox(
+        "Logger Client Not Configured",
+        "No Logger Client executable path has been set. Please configure the path in Settings."
+      );
+      return false;
+    }
+    try {
+      const spawnArgs = buildLoggerClientArgs(args);
+      const workingDir = path.dirname(execPath);
+      const childProcess = spawn(execPath, spawnArgs, { cwd: workingDir, detached: true, stdio: "ignore" });
+      childProcess.unref();
+      return true;
+    } catch (error) {
+      console.error("[firefly] Failed to open Logger Client:", error);
+      dialog.showErrorBox(
+        "Failed to Launch Logger Client",
+        `An error occurred while launching Logger Client: ${error instanceof Error ? error.message : String(error)}`
       );
       return false;
     }
@@ -765,9 +737,15 @@ export function registerFireflyIpc() {
   });
 
   // --- Screen Recording ---
-  ipcMain.handle("firefly:start-screen-recording", async (_e, { serial }: { serial: string }) => {
+  ipcMain.handle("firefly:start-screen-recording", async (_e, { serial, bitRate, resolution, showTaps }: { 
+    serial: string; 
+    bitRate: number; 
+    resolution: number; 
+    showTaps: boolean 
+  }) => {
     try {
       console.log(`[firefly] Starting screen recording for device ${serial}`);
+      console.log(`[firefly] Options - bitRate: ${bitRate}Mbps, resolution: ${resolution}%, showTaps: ${showTaps}`);
       
       // Check if already recording
       if (activeRecordings.has(serial)) {
@@ -778,12 +756,96 @@ export function registerFireflyIpc() {
       const adbPath = getAdbPath();
       const recordingPath = `/sdcard/firefly_recording_${Date.now()}.mp4`;
       
-      // Start screenrecord process with extended time limit
-      // Setting time limit to 1800 seconds (30 minutes) - much longer than default 180s
-      // User can stop manually at any time before the limit
-      const recordProcess = spawn(adbPath, ["-s", serial, "shell", "screenrecord", "--time-limit", "1800", recordingPath], {
+      // Get Android version to determine screenrecord parameters
+      console.log(`[firefly] Checking Android version for device ${serial}`);
+      const versionResult = await adbs(serial, "shell", "getprop", "ro.build.version.sdk");
+      const sdkVersion = parseInt(versionResult.out.trim());
+      console.log(`[firefly] Device SDK version: ${sdkVersion}`);
+      
+      // Enable show touches system setting if requested (like Android Studio does)
+      if (showTaps) {
+        console.log(`[firefly] Enabling show_touches system setting...`);
+        try {
+          await adbs(serial, "shell", "settings", "put", "system", "show_touches", "1");
+          console.log(`[firefly] Show touches enabled via system settings`);
+        } catch (e) {
+          console.warn(`[firefly] Failed to enable show_touches:`, e);
+        }
+      }
+      
+      // Build screenrecord command args
+      const recordArgs = ["-s", serial, "shell", "screenrecord"];
+      
+      // Add bit rate parameter (format: 4000000 for 4Mbps)
+      // Limit bit rate on older Android versions for better compatibility
+      const maxBitRate = sdkVersion < 28 ? 8 : bitRate; // Max 8Mbps for Android < 9
+      const bitRateValue = Math.floor(Math.min(bitRate, maxBitRate) * 1000000);
+      recordArgs.push("--bit-rate", bitRateValue.toString());
+      console.log(`[firefly] Bit rate: ${bitRateValue} (${Math.min(bitRate, maxBitRate)}Mbps)`);
+      
+      // Add size parameter for resolution scaling
+      // Get device screen size first
+      if (resolution !== 100) {
+        try {
+          const sizeResult = await adbs(serial, "shell", "wm", "size");
+          const sizeMatch = sizeResult.out.match(/Physical size: (\d+)x(\d+)/);
+          if (sizeMatch) {
+            const width = parseInt(sizeMatch[1]);
+            const height = parseInt(sizeMatch[2]);
+            const scaledWidth = Math.floor(width * (resolution / 100));
+            const scaledHeight = Math.floor(height * (resolution / 100));
+            // Make dimensions even for video encoding
+            const evenWidth = scaledWidth - (scaledWidth % 2);
+            const evenHeight = scaledHeight - (scaledHeight % 2);
+            recordArgs.push("--size", `${evenWidth}x${evenHeight}`);
+            console.log(`[firefly] Resolution: ${evenWidth}x${evenHeight} (${resolution}% of ${width}x${height})`);
+          }
+        } catch (e) {
+          console.warn(`[firefly] Failed to get device screen size, using default resolution:`, e);
+        }
+      }
+      
+      // --time-limit parameter is supported from Android 4.4 (API 19) but may not work reliably on all versions
+      // For Android 9+ (API 28+), we can safely use extended time limits
+      // For older versions, use default to ensure compatibility
+      if (sdkVersion >= 28) {
+        // Android 9+ - use extended time limit (30 minutes)
+        console.log(`[firefly] Using extended time limit (1800s) for Android 9+`);
+        recordArgs.push("--time-limit", "1800");
+      } else if (sdkVersion >= 19) {
+        // Android 4.4-8.1 - use default time limit to avoid compatibility issues
+        // Default is 180 seconds (3 minutes) which is more reliable on older devices
+        console.log(`[firefly] Using default time limit for Android ${sdkVersion} (older version)`);
+        // Don't add --time-limit parameter to use system default
+      } else {
+        console.warn(`[firefly] Android version ${sdkVersion} may not support screenrecord`);
+      }
+      
+      recordArgs.push(recordingPath);
+      
+      console.log(`[firefly] Executing screenrecord with args:`, recordArgs);
+      
+      // Start screenrecord process
+      const recordProcess = spawn(adbPath, recordArgs, {
         stdio: ['ignore', 'pipe', 'pipe']
       });
+      
+      // Capture stderr to log any errors from screenrecord
+      let stderrOutput = '';
+      if (recordProcess.stderr) {
+        recordProcess.stderr.on('data', (data) => {
+          const output = data.toString();
+          stderrOutput += output;
+          console.error(`[firefly] screenrecord stderr:`, output);
+        });
+      }
+      
+      // Capture stdout as well
+      if (recordProcess.stdout) {
+        recordProcess.stdout.on('data', (data) => {
+          console.log(`[firefly] screenrecord stdout:`, data.toString());
+        });
+      }
       
       activeRecordings.set(serial, recordProcess);
       
@@ -792,13 +854,44 @@ export function registerFireflyIpc() {
         activeRecordings.delete(serial);
       });
       
-      recordProcess.on('exit', (code) => {
-        console.log(`[firefly] Screen recording process exited with code ${code}`);
+      recordProcess.on('exit', (code, signal) => {
+        console.log(`[firefly] Screen recording process exited with code ${code}, signal ${signal}`);
+        if (code !== 0 && code !== null) {
+          console.error(`[firefly] screenrecord failed with exit code ${code}`);
+          if (stderrOutput) {
+            console.error(`[firefly] Error output: ${stderrOutput}`);
+          }
+        }
         activeRecordings.delete(serial);
       });
       
-      console.log(`[firefly] Screen recording started: ${recordingPath}`);
-      return { success: true, recordingPath };
+      // Wait a moment to check if the process started successfully
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      if (!recordProcess.pid || recordProcess.exitCode !== null) {
+        const errorMsg = stderrOutput || 'Process failed to start or exited immediately';
+        console.error(`[firefly] Failed to start recording:`, errorMsg);
+        activeRecordings.delete(serial);
+        return { 
+          success: false, 
+          message: `Failed to start recording: ${errorMsg}. Try disabling "Show Taps" if the issue persists.`
+        };
+      }
+      
+      console.log(`[firefly] Screen recording started successfully: ${recordingPath} (PID: ${recordProcess.pid})`);
+      
+      // Return info including time limit for user awareness
+      const timeLimitInfo = sdkVersion >= 28 
+        ? "Up to 30 minutes" 
+        : "Up to 3 minutes (Android limitation)";
+      console.log(`[firefly] Time limit: ${timeLimitInfo}`);
+      
+      return { 
+        success: true, 
+        recordingPath,
+        sdkVersion,
+        timeLimitInfo
+      };
     } catch (error) {
       console.error("Failed to start screen recording:", error);
       throw error;
@@ -807,7 +900,20 @@ export function registerFireflyIpc() {
 
   ipcMain.handle("firefly:stop-screen-recording", async (_e, { serial, recordingPath }: { serial: string; recordingPath: string }) => {
     try {
-      console.log(`[firefly] Stopping screen recording for device ${serial}`);
+      console.log(`[firefly] ========== STOP RECORDING START ==========`);
+      console.log(`[firefly] Device serial: ${serial}`);
+      console.log(`[firefly] Recording path: ${recordingPath}`);
+      console.log(`[firefly] Platform: ${process.platform}`);
+      console.log(`[firefly] App packaged: ${app.isPackaged}`);
+      
+      // Disable show touches system setting
+      console.log(`[firefly] Disabling show_touches system setting...`);
+      try {
+        await adbs(serial, "shell", "settings", "put", "system", "show_touches", "0");
+        console.log(`[firefly] Show touches disabled`);
+      } catch (e) {
+        console.warn(`[firefly] Failed to disable show_touches:`, e);
+      }
       
       const recordProcess = activeRecordings.get(serial);
       if (!recordProcess) {
@@ -815,39 +921,54 @@ export function registerFireflyIpc() {
         return { success: false, message: "No active recording found" };
       }
       
+      console.log(`[firefly] Found active recording process (PID: ${recordProcess.pid})`);
+      
       // Stop the recording by killing the process
+      console.log(`[firefly] Sending SIGINT to recording process...`);
       recordProcess.kill('SIGINT');
       
       // Wait a bit for the file to be finalized
+      console.log(`[firefly] Waiting 1.5s for file finalization...`);
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Remove from active recordings
       activeRecordings.delete(serial);
+      console.log(`[firefly] Removed from active recordings map`);
       
-      // Show save dialog
+      // Verify the recording file exists on device before showing dialog
+      console.log(`[firefly] Checking if recording file exists on device...`);
+      const checkFile = await adbs(serial, "shell", "ls", "-l", recordingPath);
+      if (checkFile.code !== 0) {
+        console.error(`[firefly] Recording file not found on device: ${checkFile.err}`);
+        return { success: false, message: `Recording file not found on device: ${checkFile.err}` };
+      }
+      console.log(`[firefly] Recording file exists on device: ${checkFile.out.trim()}`);
+      
+      // Get save path from config or use Desktop as default
+      const config = await loadConfig();
+      let savePath = config.recording_save_path;
+      
+      // If no save path configured, use Desktop
+      if (!savePath || savePath.trim() === "") {
+        savePath = app.getPath('desktop');
+        console.log(`[firefly] No save path configured, using Desktop: ${savePath}`);
+      } else {
+        console.log(`[firefly] Using configured save path: ${savePath}`);
+      }
+      
+      // Generate filename with timestamp
       const now = new Date();
       const timestamp = now.getHours().toString().padStart(2, '0') + '-' +
                        now.getMinutes().toString().padStart(2, '0') + '-' +
                        now.getSeconds().toString().padStart(2, '0');
-      const defaultName = `screen_recording_${timestamp}.mp4`;
-      
-      const result = await dialog.showSaveDialog({
-        title: "Save Screen Recording",
-        defaultPath: defaultName,
-        filters: [
-          { name: "MP4 Videos", extensions: ["mp4"] }
-        ]
-      });
-      
-      if (result.canceled || !result.filePath) {
-        // Clean up the recording file on device
-        await adbs(serial, "shell", "rm", recordingPath);
-        return { success: false, message: "Save canceled", canceled: true };
-      }
+      const fileName = `screen_recording_${timestamp}.mp4`;
+      const fullPath = path.join(savePath, fileName);
+      console.log(`[firefly] Auto-saving to: ${fullPath}`);
       
       // Pull the recording from the device
-      console.log(`[firefly] Pulling recording from device: ${recordingPath}`);
-      const pullResult = await adbs(serial, "pull", recordingPath, result.filePath);
+      console.log(`[firefly] Pulling recording from device: ${recordingPath} -> ${fullPath}`);
+      const pullResult = await adbs(serial, "pull", recordingPath, fullPath);
+      console.log(`[firefly] Pull result - code: ${pullResult.code}, err: ${pullResult.err}, out: ${pullResult.out}`);
       
       if (pullResult.code !== 0) {
         console.error(`[firefly] Failed to pull recording: ${pullResult.err}`);
@@ -855,11 +976,17 @@ export function registerFireflyIpc() {
       }
       
       // Clean up the recording file on device
+      console.log(`[firefly] Cleaning up recording file on device...`);
       await adbs(serial, "shell", "rm", recordingPath);
       
-      console.log(`[firefly] Screen recording saved to ${result.filePath}`);
-      return { success: true, filePath: result.filePath };
+      console.log(`[firefly] Screen recording saved to ${fullPath}`);
+      console.log(`[firefly] ========== STOP RECORDING SUCCESS ==========`);
+      return { success: true, filePath: fullPath };
     } catch (error) {
+      console.error(`[firefly] ========== STOP RECORDING ERROR ==========`);
+      console.error(`[firefly] Error type: ${error instanceof Error ? error.constructor.name : typeof error}`);
+      console.error(`[firefly] Error message: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[firefly] Error stack:`, error instanceof Error ? error.stack : 'N/A');
       console.error("Failed to stop screen recording:", error);
       // Try to clean up
       activeRecordings.delete(serial);

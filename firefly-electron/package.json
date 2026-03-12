@@ -1,7 +1,7 @@
 {
   "name": "firefly",
   "productName": "Firefly",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Firefly Desktop Application",
   "main": "./out/main/index.js",
   "author": "JNE - Planet Payment Development Team",
@@ -11,6 +11,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest run",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
@@ -55,6 +56,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "typescript": "^5.9.2",
-    "vite": "^7.1.6"
+    "vite": "^7.1.6",
+    "vitest": "^4.1.0"
   }
 }

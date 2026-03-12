@@ -8,6 +8,8 @@ import Logcat from "./components/Logcat";
 import VideoGenerator from "./components/VideoGenerator";
 import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
+import RecordingOptionsDialog from "./components/RecordingOptionsDialog";
+import LoggerClientParamsDialog from "./components/LoggerClientParamsDialog";
 import { Save, XCircle } from "lucide-react";
 
 interface Device {
@@ -69,6 +71,9 @@ export default function App() {
   const [scrcpyStatus, setScrcpyStatus] = React.useState<{ working: boolean; path: string; error?: string } | null>(null);
   const [testingScrcpy, setTestingScrcpy] = React.useState<boolean>(false);
   const [butterflyPath, setButterflyPath] = React.useState<string>("");
+  const [loggerClientPath, setLoggerClientPath] = React.useState<string>("");
+  const [loggerClientSendParams, setLoggerClientSendParams] = React.useState(false);
+  const [showLoggerClientDialog, setShowLoggerClientDialog] = React.useState(false);
 
   // Version and update state
   const [currentVersion, setCurrentVersion] = React.useState<string>("1.0.0");
@@ -91,12 +96,22 @@ export default function App() {
   
   // Butterfly state
   const [openingButterfly, setOpeningButterfly] = React.useState(false);
+
+  // Logger Client state
+  const [openingLoggerClient, setOpeningLoggerClient] = React.useState(false);
   
   // Screen Recording state
   const [isRecording, setIsRecording] = React.useState(false);
   const [recordingPath, setRecordingPath] = React.useState<string | null>(null);
   const [recordingSeconds, setRecordingSeconds] = React.useState(0);
   const recordingStartTimeRef = React.useRef<number | null>(null);
+  const [recordingOptionsOpen, setRecordingOptionsOpen] = React.useState(false);
+  const [recordingOptions, setRecordingOptions] = React.useState<{
+    bitRate: number;
+    resolution: number;
+    showTaps: boolean;
+    savePath: string;
+  }>({ bitRate: 4, resolution: 100, showTaps: true, savePath: "" });
   
   React.useEffect(() => {
     isMounted.current = true;
@@ -170,6 +185,14 @@ export default function App() {
       setPollingEnabled(cfg?.polling_enabled ?? true);
       setPollingInterval(cfg?.polling_interval ?? 2000);
       
+      // Load recording preferences
+      setRecordingOptions({
+        bitRate: cfg?.recording_bit_rate ?? 4,
+        resolution: cfg?.recording_resolution ?? 100,
+        showTaps: cfg?.recording_show_taps ?? true,
+        savePath: cfg?.recording_save_path || ""
+      });
+      
       // Initialize ADB and Scrcpy status from environment detection only
       // If found in environment, show the path; if not found, show empty state
       try {
@@ -185,6 +208,10 @@ export default function App() {
       } catch (e) {
         setScrcpyStatus({ working: false, path: '', error: 'Not found in environment' });
       }
+
+      setButterflyPath(cfg?.butterfly_path || "");
+      setLoggerClientPath(cfg?.logger_client_path || "");
+      setLoggerClientSendParams(cfg?.logger_client_send_params ?? false);
     } catch (e) {
       console.error("getConfig failed:", e);
     }
@@ -376,6 +403,10 @@ export default function App() {
   }
 
   async function handleOpenButterfly() {
+    if (!butterflyPath) {
+      setShowSettings(true);
+      return;
+    }
     try {
       setOpeningButterfly(true);
       const success = await window.firefly.openButterfly();
@@ -387,6 +418,42 @@ export default function App() {
     } catch (e) {
       console.error("Error opening Butterfly:", e);
       setOpeningButterfly(false);
+    }
+  }
+
+  async function handleOpenLoggerClient() {
+    if (!loggerClientPath) {
+      setShowSettings(true);
+      return;
+    }
+    try {
+      setOpeningLoggerClient(true);
+      const params = loggerClientSendParams && deviceIpAddress
+        ? { ip: deviceIpAddress, port: "10000", pattern: "%d [%c{1}] %p - %m" }
+        : undefined;
+      const success = await window.firefly.openLoggerClient(params);
+      if (!success) {
+        console.error("Failed to open Logger Client");
+      }
+      // Keep feedback for 2 seconds
+      setTimeout(() => setOpeningLoggerClient(false), 2000);
+    } catch (e) {
+      console.error("Error opening Logger Client:", e);
+      setOpeningLoggerClient(false);
+    }
+  }
+
+  async function handleOpenLoggerClientWithParams(params: { ip: string; port: string; pattern: string }) {
+    try {
+      setOpeningLoggerClient(true);
+      const success = await window.firefly.openLoggerClient(params);
+      if (!success) {
+        console.error("Failed to open Logger Client");
+      }
+      setTimeout(() => setOpeningLoggerClient(false), 2000);
+    } catch (e) {
+      console.error("Error opening Logger Client:", e);
+      setOpeningLoggerClient(false);
     }
   }
 
@@ -489,32 +556,49 @@ export default function App() {
   async function handleToggleScreenRecording() {
     const serial = currentSerial();
     if (!serial) {
+      console.warn("[renderer] No device serial found");
       return;
     }
 
     if (isRecording) {
       // Stop recording
+      console.log("[renderer] ========== STOP RECORDING (RENDERER) ==========");
+      console.log(`[renderer] Device serial: ${serial}`);
+      console.log(`[renderer] Recording path: ${recordingPath}`);
+      
       if (!recordingPath) {
-        console.error("No recording path found");
+        console.error("[renderer] No recording path found");
+        alert("Error: No recording path found. Please try recording again.");
         return;
       }
 
       // Immediately stop the timer and update UI
+      console.log("[renderer] Stopping timer and updating UI...");
       setIsRecording(false);
       recordingStartTimeRef.current = null;
 
       try {
+        console.log("[renderer] Calling stopScreenRecording IPC...");
         const result = await window.firefly.stopScreenRecording({ serial, recordingPath });
+        console.log("[renderer] IPC result:", JSON.stringify(result, null, 2));
         
         if (result.success && result.filePath) {
           console.log(`[renderer] Screen recording saved to ${result.filePath}`);
-          // Optionally reveal the file
+          // Auto-reveal the file location
           await window.firefly.revealInFileManager(result.filePath);
         } else if (result.canceled) {
           console.log(`[renderer] Screen recording save was canceled`);
+        } else {
+          console.warn(`[renderer] Unexpected result:`, result);
+          if (result.message) {
+            alert(`Recording stopped but save failed: ${result.message}`);
+          }
         }
       } catch (e) {
-        console.error("Failed to stop screen recording:", e);
+        console.error("[renderer] ========== STOP RECORDING ERROR (RENDERER) ==========");
+        console.error("[renderer] Error type:", e instanceof Error ? e.constructor.name : typeof e);
+        console.error("[renderer] Error message:", e instanceof Error ? e.message : String(e));
+        console.error("[renderer] Full error:", e);
         alert(`Failed to stop screen recording: ${e instanceof Error ? e.message : 'Unknown error'}`);
       } finally {
         // Clean up remaining state
@@ -522,24 +606,76 @@ export default function App() {
         setRecordingSeconds(0);
       }
     } else {
-      // Start recording
-      try {
-        const result = await window.firefly.startScreenRecording({ serial });
-        
-        if (result.success && result.recordingPath) {
-          console.log(`[renderer] Screen recording started: ${result.recordingPath}`);
-          setIsRecording(true);
-          setRecordingPath(result.recordingPath);
-          setRecordingSeconds(0);
-          recordingStartTimeRef.current = Date.now();
-        } else {
-          alert(`Failed to start screen recording: ${result.message || 'Unknown error'}`);
-        }
-      } catch (e) {
-        console.error("Failed to start screen recording:", e);
-        alert(`Failed to start screen recording: ${e instanceof Error ? e.message : 'Unknown error'}`);
-      }
+      // Show options dialog before starting
+      console.log("[renderer] Opening recording options dialog");
+      setRecordingOptionsOpen(true);
     }
+  }
+
+  async function handleStartRecordingWithOptions(options: { bitRate: number; resolution: number; showTaps: boolean; savePath: string }) {
+    const serial = currentSerial();
+    if (!serial) {
+      console.warn("[renderer] No device serial found");
+      return;
+    }
+
+    console.log("[renderer] ========== START RECORDING (RENDERER) ==========");
+    console.log(`[renderer] Device serial: ${serial}`);
+    console.log(`[renderer] Options:`, options);
+
+    try {
+      // Save options to state and config for next time
+      setRecordingOptions(options);
+      await window.firefly.setConfig({
+        recording_bit_rate: options.bitRate,
+        recording_resolution: options.resolution,
+        recording_show_taps: options.showTaps,
+        recording_save_path: options.savePath
+      });
+
+      console.log("[renderer] Calling startScreenRecording IPC...");
+      const result = await window.firefly.startScreenRecording({
+        serial,
+        bitRate: options.bitRate,
+        resolution: options.resolution,
+        showTaps: options.showTaps
+      });
+      console.log("[renderer] IPC result:", JSON.stringify(result, null, 2));
+      
+      if (result.success && result.recordingPath) {
+        console.log(`[renderer] Screen recording started: ${result.recordingPath}`);
+        console.log(`[renderer] SDK version: ${result.sdkVersion}, Time limit: ${result.timeLimitInfo}`);
+        setIsRecording(true);
+        setRecordingPath(result.recordingPath);
+        setRecordingSeconds(0);
+        recordingStartTimeRef.current = Date.now();
+        setRecordingOptionsOpen(false);
+      } else {
+        console.warn(`[renderer] Failed to start recording:`, result);
+        alert(`Failed to start screen recording: ${result.message || 'Unknown error'}`);
+      }
+    } catch (e) {
+      console.error("[renderer] ========== START RECORDING ERROR (RENDERER) ==========");
+      console.error("[renderer] Error:", e);
+      alert(`Failed to start screen recording: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+
+  async function handleConfigureSavePath(): Promise<string | undefined> {
+    try {
+      const currentPath = recordingOptions.savePath || "";
+      const result = await window.firefly.pickDirectory(currentPath);
+      if (result) {
+        const newOptions = { ...recordingOptions, savePath: result };
+        setRecordingOptions(newOptions);
+        await window.firefly.setConfig({ recording_save_path: result });
+        return result;
+      }
+    } catch (e) {
+      console.error("Failed to pick save path:", e);
+      alert(`Failed to select save location: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+    return undefined;
   }
 
   async function onSelectDeviceSerial(serial: string) {
@@ -625,7 +761,7 @@ export default function App() {
 
       // 4. Restart the app
       setStatus("Restarting terminal app…");
-      const restartOk = await window.firefly.restartApp(TARGET_PACKAGE);
+      const restartOk = await window.firefly.restartApp({ pkg: TARGET_PACKAGE, serial });
       if (!restartOk) {
         throw new Error("Failed to restart terminal app");
       }
@@ -760,6 +896,10 @@ export default function App() {
         
         // Save butterfly path
         configUpdates.butterfly_path = butterflyPath;
+
+        // Save logger client path
+        configUpdates.logger_client_path = loggerClientPath;
+        configUpdates.logger_client_send_params = loggerClientSendParams;
         
         await window.firefly.setConfig(configUpdates);
         setShowSettings(false);
@@ -828,6 +968,20 @@ export default function App() {
         });
         if (path) {
           setButterflyPath(path);
+        }
+      } catch (e) {
+        alert(`Failed to open file picker: ${e}`);
+      }
+    }
+
+    async function browseLoggerClient() {
+      try {
+        const path = await window.firefly.pickFile({
+          title: "Select Logger Client Executable",
+          fileType: "executable",
+        });
+        if (path) {
+          setLoggerClientPath(path);
         }
       } catch (e) {
         alert(`Failed to open file picker: ${e}`);
@@ -939,7 +1093,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <div className="text-sm font-medium text-white">Butterfly Path</div>
-                  <div className="text-xs text-white/60">Custom Butterfly script (leave empty for bundled)</div>
+                  <div className="text-xs text-white/60">Path to the Butterfly script</div>
                   {butterflyPath && (
                     <div className="text-xs text-white/40 truncate" style={{ maxWidth: '200px' }} title={butterflyPath}>Path: {butterflyPath}</div>
                   )}
@@ -951,6 +1105,39 @@ export default function App() {
                 >
                   Select...
                 </button>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">Logger Client Path</div>
+                  <div className="text-xs text-white/60">Path to the Logger Client executable</div>
+                  {loggerClientPath && (
+                    <div className="text-xs text-white/40 truncate" style={{ maxWidth: '200px' }} title={loggerClientPath}>Path: {loggerClientPath}</div>
+                  )}
+                </div>
+                <button
+                  onClick={browseLoggerClient}
+                  className="px-3 py-1 text-xs rounded border"
+                  style={{ borderColor: "rgba(255,255,255,0.12)", color: "#fff" }}
+                >
+                  Select...
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-medium text-white">Pass Connection Params</div>
+                  <div className="text-xs text-white/60">Auto-fill IP and port when launching Logger Client</div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={loggerClientSendParams}
+                    onChange={(e) => setLoggerClientSendParams(e.target.checked)}
+                    className="w-4 h-4 rounded"
+                    style={{ accentColor: ACCENT }}
+                  />
+                </label>
               </div>
 
               <div className="flex items-center justify-between mb-4">
@@ -1071,6 +1258,11 @@ export default function App() {
           takingScreenshot={takingScreenshot}
           openButterfly={handleOpenButterfly}
           openingButterfly={openingButterfly}
+          butterflyConfigured={!!butterflyPath}
+          openLoggerClient={handleOpenLoggerClient}
+          openingLoggerClient={openingLoggerClient}
+          loggerClientConfigured={!!loggerClientPath}
+          openLoggerClientSettings={() => setShowLoggerClientDialog(true)}
           toggleScreenRecording={handleToggleScreenRecording}
           isRecording={isRecording}
           recordingSeconds={recordingSeconds}
@@ -1117,6 +1309,14 @@ export default function App() {
       </div>
 
       {showSettings && <SettingsDialog />}
+      {showLoggerClientDialog && (
+        <LoggerClientParamsDialog
+          isOpen={showLoggerClientDialog}
+          onClose={() => setShowLoggerClientDialog(false)}
+          defaultIp={deviceIpAddress || ""}
+          onOpen={handleOpenLoggerClientWithParams}
+        />
+      )}
       {showConfigSettings && (
         <ConfigurationSettingsDialog
           onClose={() => setShowConfigSettings(false)}
@@ -1138,6 +1338,16 @@ export default function App() {
           onRecapture={handleRecaptureScreenshot}
           copied={screenshotCopied}
           isCapturing={takingScreenshot}
+        />
+      )}
+      {recordingOptionsOpen && (
+        <RecordingOptionsDialog
+          isOpen={recordingOptionsOpen}
+          onClose={() => setRecordingOptionsOpen(false)}
+          onStartRecording={handleStartRecordingWithOptions}
+          onConfigure={handleConfigureSavePath}
+          maxTimeLimit={deviceAndroidVersion && parseInt(deviceAndroidVersion) >= 9 ? "30 minutes" : "3 minutes"}
+          initialOptions={recordingOptions}
         />
       )}
     </div>

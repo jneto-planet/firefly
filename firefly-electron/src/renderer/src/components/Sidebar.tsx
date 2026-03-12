@@ -10,6 +10,7 @@ import {
   Video,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
+import LoggerClientIcon from "./LoggerClientIcon";
 import { motion } from "framer-motion";
 
 import fireflylogo from "../assets/icons/firefly.png";
@@ -46,6 +47,13 @@ interface SidebarProps {
   // Butterfly
   openButterfly: () => void;
   openingButterfly: boolean;
+  butterflyConfigured: boolean;
+
+  // Logger Client
+  openLoggerClient: () => void;
+  openingLoggerClient: boolean;
+  loggerClientConfigured: boolean;
+  openLoggerClientSettings: () => void;
   
   // Screen Recording
   toggleScreenRecording: () => void;
@@ -113,6 +121,11 @@ export default function Sidebar({
   takingScreenshot,
   openButterfly,
   openingButterfly,
+  butterflyConfigured,
+  openLoggerClient,
+  openingLoggerClient,
+  loggerClientConfigured,
+  openLoggerClientSettings,
   toggleScreenRecording,
   isRecording,
   recordingSeconds,
@@ -340,36 +353,96 @@ export default function Sidebar({
               </TooltipTrigger>
               <TooltipContent>{isRecording ? "Stop Recording" : "Screen Recording"}</TooltipContent>
             </Tooltip>
+          </div>
+        </div>
+
+        {/* Software Section */}
+        <div>
+          <div className="px-3 py-1 mb-1">
+            <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Software</span>
+          </div>
+          <div className="space-y-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={openButterfly}
-                  className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
-                    openingButterfly ? "bg-white/10" : "bg-white/5"
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
+                    !butterflyConfigured
+                      ? "opacity-40 hover:bg-white/5"
+                      : openingButterfly
+                      ? "bg-white/10"
+                      : "hover:bg-white/5"
                   }`}
                 >
-                  <motion.div
-                    className="w-full h-full flex items-center justify-center"
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ duration: 0.4, delay: 0.3 }}
-                    whileHover={!openingButterfly ? { rotate: [0, -10, 10, -10, 10, 0] } : {}}
-                  >
-                    <PiButterflyLight 
-                      className="h-5 w-5" 
-                      color={openingButterfly ? "#FFD86A" : "#fff"} 
-                    />
-                  </motion.div>
-                  {openingButterfly && (
-                    <span
-                      className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
-                      style={{ backgroundColor: "#FFD86A" }}
-                    />
-                  )}
+                  <div className="flex items-center gap-2">
+                    <motion.div
+                      animate={openingButterfly && butterflyConfigured ? { rotate: [0, -10, 10, -10, 10, 0] } : {}}
+                      transition={{ duration: 0.5, repeat: openingButterfly ? Infinity : 0 }}
+                    >
+                      <PiButterflyLight
+                        className="h-4 w-4"
+                        color={openingButterfly && butterflyConfigured ? "#FFD86A" : "#fff"}
+                      />
+                    </motion.div>
+                    <span className="text-sm text-white">Butterfly</span>
+                    {openingButterfly && butterflyConfigured && (
+                      <span
+                        className="h-2 w-2 rounded-full animate-pulse"
+                        style={{ backgroundColor: "#FFD86A" }}
+                      />
+                    )}
+                  </div>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Open Butterfly</TooltipContent>
+              <TooltipContent>
+                {butterflyConfigured ? "Open Butterfly" : "Configure Butterfly path in Settings"}
+              </TooltipContent>
             </Tooltip>
+
+            <div className={`flex items-center rounded-lg transition ${!loggerClientConfigured ? "opacity-40" : ""}`}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={openLoggerClient}
+                    className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-l-lg transition ${
+                      openingLoggerClient && loggerClientConfigured ? "bg-white/10" : "hover:bg-white/5"
+                    }`}
+                  >
+                    <motion.div
+                      animate={openingLoggerClient && loggerClientConfigured ? { rotate: [0, -10, 10, -10, 10, 0] } : {}}
+                      transition={{ duration: 0.5, repeat: openingLoggerClient ? Infinity : 0 }}
+                    >
+                      <LoggerClientIcon
+                        className="h-4 w-4"
+                        color={openingLoggerClient && loggerClientConfigured ? "#FFD86A" : "#fff"}
+                      />
+                    </motion.div>
+                    <span className="text-sm text-white">Logger Client</span>
+                    {openingLoggerClient && loggerClientConfigured && (
+                      <span
+                        className="h-2 w-2 rounded-full animate-pulse"
+                        style={{ backgroundColor: "#FFD86A" }}
+                      />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {loggerClientConfigured ? "Open Logger Client" : "Configure Logger Client path in Settings"}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={openLoggerClientSettings}
+                    disabled={!loggerClientConfigured}
+                    className="px-2 py-2 rounded-r-lg hover:bg-white/5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Settings className="h-3.5 w-3.5" color="#fff" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Manual connection params</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </div>
 

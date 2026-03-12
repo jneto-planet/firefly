@@ -18,11 +18,12 @@ contextBridge.exposeInMainWorld("firefly", {
 
   deleteOldCccFiles: (args: any) => ipcRenderer.invoke("firefly:delete-old", args),
   pushAndReplace: (args: any) => ipcRenderer.invoke("firefly:push-replace", args),
-  restartApp: (pkg: string) => ipcRenderer.invoke("firefly:restart", pkg),
+  restartApp: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:restart", args),
   pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => ipcRenderer.invoke("firefly:pull-xml-from-device", args),
   clearTidFromDataStore: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:clear-tid-from-datastore", args),
   launchScrcpy: (args: any) => ipcRenderer.invoke("firefly:launch-scrcpy", args),
   openButterfly: () => ipcRenderer.invoke("firefly:open-butterfly"),
+  openLoggerClient: (args?: { ip?: string; port?: string; pattern?: string }) => ipcRenderer.invoke("firefly:open-logger-client", args),
   takeScreenshot: (args: { serial: string }) => ipcRenderer.invoke("firefly:take-screenshot", args),
   saveScreenshot: (args: { base64Data: string; deviceName: string }) => ipcRenderer.invoke("firefly:save-screenshot", args),
   startScreenRecording: (args: { serial: string }) => ipcRenderer.invoke("firefly:start-screen-recording", args),
