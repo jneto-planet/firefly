@@ -805,18 +805,16 @@ export function registerFireflyIpc() {
         }
       }
       
-      // --time-limit parameter is supported from Android 4.4 (API 19) but may not work reliably on all versions
-      // For Android 9+ (API 28+), we can safely use extended time limits
-      // For older versions, use default to ensure compatibility
-      if (sdkVersion >= 28) {
-        // Android 9+ - use extended time limit (30 minutes)
-        console.log(`[firefly] Using extended time limit (1800s) for Android 9+`);
+      // Android's screenrecord enforces a hard 180s max on --time-limit for Android 4.4-13 (SDK 19-33).
+      // Passing a value > 180 causes screenrecord to exit immediately with code 2 on those versions.
+      // Android 14+ (SDK 34) removed the 180s cap, allowing extended recording times.
+      if (sdkVersion >= 34) {
+        // Android 14+ - use extended time limit (30 minutes)
+        console.log(`[firefly] Using extended time limit (1800s) for Android 14+ (SDK ${sdkVersion})`);
         recordArgs.push("--time-limit", "1800");
       } else if (sdkVersion >= 19) {
-        // Android 4.4-8.1 - use default time limit to avoid compatibility issues
-        // Default is 180 seconds (3 minutes) which is more reliable on older devices
-        console.log(`[firefly] Using default time limit for Android ${sdkVersion} (older version)`);
-        // Don't add --time-limit parameter to use system default
+        // Android 4.4-13 - don't add --time-limit to use the system default (180s)
+        console.log(`[firefly] Using default time limit (180s) for Android SDK ${sdkVersion}`);
       } else {
         console.warn(`[firefly] Android version ${sdkVersion} may not support screenrecord`);
       }
@@ -881,7 +879,7 @@ export function registerFireflyIpc() {
       console.log(`[firefly] Screen recording started successfully: ${recordingPath} (PID: ${recordProcess.pid})`);
       
       // Return info including time limit for user awareness
-      const timeLimitInfo = sdkVersion >= 28 
+      const timeLimitInfo = sdkVersion >= 34 
         ? "Up to 30 minutes" 
         : "Up to 3 minutes (Android limitation)";
       console.log(`[firefly] Time limit: ${timeLimitInfo}`);
