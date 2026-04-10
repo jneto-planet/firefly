@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld("firefly", {
       outputPath: string;
     }) => ipcRenderer.invoke("firefly:generate-video", options),
     
+    // Accessibility Converter
+    pickAccessibilityImages: () => ipcRenderer.invoke("firefly:pick-accessibility-images"),
+    pickAccessibilityOutputDir: () => ipcRenderer.invoke("firefly:pick-accessibility-output-dir"),
+    readImageAsDataUrl: (filePath: string) => ipcRenderer.invoke("firefly:read-image-as-data-url", filePath),
+    saveAccessibilityImage: (args: { originalPath: string; base64Data: string; suffix: string; outputDir: string }) => ipcRenderer.invoke("firefly:save-accessibility-image", args),
+
     // Event listeners
     onScrcpyClosed: (callback: (data: { serial: string }) => void) => {
       const listener = (_event: any, data: { serial: string }) => callback(data);

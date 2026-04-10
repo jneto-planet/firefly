@@ -114,6 +114,12 @@ declare global {
         outputPath: string;
       }) => Promise<any>;
 
+      // --- Accessibility Converter ---
+      pickAccessibilityImages: () => Promise<string[]>;
+      pickAccessibilityOutputDir: () => Promise<string | null>;
+      readImageAsDataUrl: (filePath: string) => Promise<string>;
+      saveAccessibilityImage: (args: { originalPath: string; base64Data: string; suffix: string; outputDir: string }) => Promise<{ success: boolean; outputPath: string }>;
+
       // --- Event listeners ---
       onScrcpyClosed: (callback: (data: { serial: string }) => void) => () => void;
     };

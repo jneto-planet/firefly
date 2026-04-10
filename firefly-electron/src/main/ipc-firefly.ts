@@ -1317,4 +1317,52 @@ export function registerFireflyIpc() {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  // --- Accessibility Converter ---
+  ipcMain.handle("firefly:pick-accessibility-images", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Select Images for Accessibility Conversion",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }
+      ]
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle("firefly:read-image-as-data-url", async (_e, filePath: string) => {
+    const buffer = await fs.readFile(filePath);
+    const ext = path.extname(filePath).toLowerCase().replace(".", "");
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      bmp: "image/bmp", gif: "image/gif", webp: "image/webp",
+    };
+    const mime = mimeMap[ext] || "image/png";
+    return `data:${mime};base64,${buffer.toString("base64")}`;
+  });
+
+  ipcMain.handle("firefly:pick-accessibility-output-dir", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Select Output Folder",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle("firefly:save-accessibility-image", async (_e, args: {
+    originalPath: string;
+    base64Data: string;
+    suffix: string;
+    outputDir: string;
+  }) => {
+    const { originalPath, base64Data, suffix, outputDir } = args;
+    const ext = path.extname(originalPath);
+    const baseName = path.basename(originalPath, ext);
+    const outputPath = path.join(outputDir, `${baseName}_${suffix}.png`);
+
+    const buffer = Buffer.from(base64Data, "base64");
+    await fs.writeFile(outputPath, buffer);
+
+    return { success: true, outputPath };
+  });
 }

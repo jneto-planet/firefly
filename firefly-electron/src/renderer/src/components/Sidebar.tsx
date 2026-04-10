@@ -8,6 +8,7 @@ import {
   ScreenShare,
   Camera,
   Video,
+  Eye,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
 import LoggerClientIcon from "./LoggerClientIcon";
@@ -27,8 +28,8 @@ interface SidebarProps {
   refreshDevices: () => void;
   
   // Navigation
-  active: "configuration" | "logcat" | "video-generator";
-  setActive: (active: "configuration" | "logcat" | "video-generator") => void;
+  active: "configuration" | "logcat" | "video-generator" | "accessibility";
+  setActive: (active: "configuration" | "logcat" | "video-generator" | "accessibility") => void;
   
   // Settings
   setShowSettings: (show: boolean) => void;
@@ -479,6 +480,12 @@ export default function Sidebar({
               icon={<Film className="h-4 w-4" color="#fff" />}
               active={active === "video-generator"}
               onClick={() => setActive("video-generator")}
+            />
+            <NavItem
+              label="Accessibility"
+              icon={<Eye className="h-4 w-4" color="#fff" />}
+              active={active === "accessibility"}
+              onClick={() => setActive("accessibility")}
             />
           </div>
         </div>

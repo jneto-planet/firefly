@@ -6,6 +6,7 @@ import TitleBar from "./components/TitleBar";
 import Configuration from "./components/Configuration";
 import Logcat from "./components/Logcat";
 import VideoGenerator from "./components/VideoGenerator";
+import AccessibilityConverter from "./components/AccessibilityConverter";
 import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
 import RecordingOptionsDialog from "./components/RecordingOptionsDialog";
@@ -59,7 +60,7 @@ export default function App() {
 
   // UI shell
   const [deviceMenuOpen, setDeviceMenuOpen] = React.useState(false);
-  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator">("configuration");
+  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator" | "accessibility">("configuration");
 
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
@@ -1302,6 +1303,11 @@ export default function App() {
           )}
           {active === "video-generator" && (
             <VideoGenerator
+              status={status}
+            />
+          )}
+          {active === "accessibility" && (
+            <AccessibilityConverter
               status={status}
             />
           )}
