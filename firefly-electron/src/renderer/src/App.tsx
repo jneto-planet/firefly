@@ -7,6 +7,8 @@ import Configuration from "./components/Configuration";
 import Logcat from "./components/Logcat";
 import VideoGenerator from "./components/VideoGenerator";
 import AccessibilityConverter from "./components/AccessibilityConverter";
+import Apps from "./components/Apps";
+import { prefetchApps } from "./lib/appsCache";
 import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
 import RecordingOptionsDialog from "./components/RecordingOptionsDialog";
@@ -60,7 +62,7 @@ export default function App() {
 
   // UI shell
   const [deviceMenuOpen, setDeviceMenuOpen] = React.useState(false);
-  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator" | "accessibility">("configuration");
+  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator" | "accessibility" | "apps">("configuration");
 
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
@@ -296,6 +298,11 @@ export default function App() {
           ? "Ready"
           : "No devices. Connect and enable USB debugging."
       );
+
+      // Background prefetch apps for all online devices (no-op if already cached)
+      for (const device of list.filter(d => d.online)) {
+        prefetchApps(device.serial);
+      }
     } catch (e) {
       setStatus("ADB error");
       console.error("listDevices failed:", e);
@@ -1309,6 +1316,11 @@ export default function App() {
           {active === "accessibility" && (
             <AccessibilityConverter
               status={status}
+            />
+          )}
+          {active === "apps" && (
+            <Apps
+              currentSerial={currentSerial}
             />
           )}
         </main>

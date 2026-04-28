@@ -1,7 +1,7 @@
 {
   "name": "firefly",
   "productName": "Firefly",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Firefly Desktop Application",
   "main": "./out/main/index.js",
   "author": "JNE - Planet Payment Development Team",
@@ -30,6 +30,8 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/vite": "^4.1.16",
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.17",
     "electron-updater": "^6.3.9",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.548.0",

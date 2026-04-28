@@ -284,7 +284,6 @@ export default function AccessibilityConverter({ status: _status }: Accessibilit
               }`}
             >
               Colour Inversion
-              <p className="text-xs mt-1 opacity-60">Inverts lightness in HSL space</p>
             </button>
             <button
               onClick={() => setMode("color-correction")}
@@ -295,7 +294,6 @@ export default function AccessibilityConverter({ status: _status }: Accessibilit
               }`}
             >
               Colour Correction
-              <p className="text-xs mt-1 opacity-60">Protanomaly matrix simulation</p>
             </button>
           </div>
         </section>

@@ -120,6 +120,15 @@ declare global {
       readImageAsDataUrl: (filePath: string) => Promise<string>;
       saveAccessibilityImage: (args: { originalPath: string; base64Data: string; suffix: string; outputDir: string }) => Promise<{ success: boolean; outputPath: string }>;
 
+      // --- Apps ---
+      listApps: (args: { serial: string; thirdPartyOnly: boolean }) => Promise<{
+        success: boolean;
+        apps: Array<{ package: string; version: string; displayName: string; iconDataUrl: string | null }>;
+        error?: string;
+      }>;
+      uninstallApp: (args: { serial: string; packageName: string }) => Promise<{ success: boolean; message: string }>;
+      installApp: (args: { serial: string; apkPath: string }) => Promise<{ success: boolean; message: string }>;
+
       // --- Event listeners ---
       onScrcpyClosed: (callback: (data: { serial: string }) => void) => () => void;
     };

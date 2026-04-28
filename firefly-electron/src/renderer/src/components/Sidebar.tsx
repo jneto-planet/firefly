@@ -9,6 +9,7 @@ import {
   Camera,
   Video,
   Eye,
+  LayoutGrid,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
 import LoggerClientIcon from "./LoggerClientIcon";
@@ -28,8 +29,8 @@ interface SidebarProps {
   refreshDevices: () => void;
   
   // Navigation
-  active: "configuration" | "logcat" | "video-generator" | "accessibility";
-  setActive: (active: "configuration" | "logcat" | "video-generator" | "accessibility") => void;
+  active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps";
+  setActive: (active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps") => void;
   
   // Settings
   setShowSettings: (show: boolean) => void;
@@ -162,7 +163,7 @@ export default function Sidebar({
       </div>
 
       {/* Nav */}
-      <nav className="px-2 py-2 flex-1 space-y-3">
+      <nav className="px-2 py-2 flex-1 min-h-0 overflow-y-auto space-y-3">
         {/* Device Section */}
         <div>
           <div className="px-3 py-1 mb-1">
@@ -458,6 +459,12 @@ export default function Sidebar({
               icon={<Blocks className="h-4 w-4" color="#fff" />}
               active={active === "configuration"}
               onClick={() => setActive("configuration")}
+            />
+            <NavItem
+              label="Apps"
+              icon={<LayoutGrid className="h-4 w-4" color="#fff" />}
+              active={active === "apps"}
+              onClick={() => setActive("apps")}
             />
             <NavItem
               label="Logcat"

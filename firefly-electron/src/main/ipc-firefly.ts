@@ -2,6 +2,8 @@
 import { ipcMain, BrowserWindow, dialog, shell, app } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import os from "node:os";
+import AdmZip from "adm-zip";
 import { loadConfig, saveConfig } from "./config";
 import { buildLoggerClientArgs } from "./logger-client";
 import { autoUpdater } from "electron-updater";
@@ -1365,4 +1367,326 @@ export function registerFireflyIpc() {
 
     return { success: true, outputPath };
   });
+
+  // ─── Apps ──────────────────────────────────────────────────────────────────
+
+  ipcMain.handle("firefly:list-apps", async (_e, { serial, thirdPartyOnly }: { serial: string; thirdPartyOnly: boolean }) => {
+    try {
+      const listArgs = thirdPartyOnly
+        ? ["shell", "pm", "list", "packages", "-f", "-3"]
+        : ["shell", "pm", "list", "packages", "-f"];
+
+      const r = await adbs(serial, ...listArgs);
+      if (r.code !== 0) throw new Error(r.err || "pm list packages failed");
+
+      // Each line: "package:/data/app/com.example-xxx/base.apk=com.example"
+      const lines = r.out.split("\n").filter((l) => l.trim().startsWith("package:"));
+
+      const parsed = lines
+        .map((line) => {
+          const match = line.trim().match(/^package:(.+)=([^=\s]+)$/);
+          if (!match) return null;
+          return { apkPath: match[1], pkg: match[2] };
+        })
+        .filter(Boolean) as { apkPath: string; pkg: string }[];
+
+      const BATCH = 4;
+      const apps: AppInfo[] = [];
+
+      for (let i = 0; i < parsed.length; i += BATCH) {
+        const batch = parsed.slice(i, i + BATCH);
+        const results = await Promise.all(
+          batch.map(({ apkPath, pkg }) => fetchAppInfo(serial, pkg, apkPath))
+        );
+        apps.push(...results);
+      }
+
+      return { success: true, apps };
+    } catch (e) {
+      console.error("[firefly] list-apps failed:", e);
+      return { success: false, error: e instanceof Error ? e.message : String(e), apps: [] };
+    }
+  });
+
+  ipcMain.handle("firefly:uninstall-app", async (_e, { serial, packageName }: { serial: string; packageName: string }) => {
+    try {
+      const r = await adbs(serial, "uninstall", packageName);
+      const success = r.code === 0 && r.out.includes("Success");
+      return {
+        success,
+        message: success ? "App uninstalled successfully" : r.err || r.out || "Uninstall failed",
+      };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle("firefly:install-app", async (_e, { serial, apkPath }: { serial: string; apkPath: string }) => {
+    try {
+      const r = await adbs(serial, "install", "-r", apkPath);
+      const success = r.code === 0 && r.out.includes("Success");
+      return {
+        success,
+        message: success ? "App installed successfully" : r.err || r.out || "Install failed",
+      };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+}
+
+// ─── Apps helpers ────────────────────────────────────────────────────────────
+
+interface AppInfo {
+  package: string;
+  version: string;
+  displayName: string;
+  iconDataUrl: string | null;
+}
+
+function humanizePackageName(pkg: string): string {
+  const parts = pkg.split(".");
+  const last = parts[parts.length - 1];
+  const cleaned = last.replace(/[_-]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function parseStringPoolAt(buf: Buffer, pos: number): { strings: string[]; chunkSize: number } {
+  const headerSize = buf.readUInt16LE(pos + 2);
+  const chunkSize = buf.readUInt32LE(pos + 4);
+  const stringCount = buf.readUInt32LE(pos + 8);
+  const flags = buf.readUInt32LE(pos + 16);
+  const stringsStart = buf.readUInt32LE(pos + 20);
+  const isUtf8 = (flags & 0x100) !== 0;
+
+  const strings: string[] = [];
+  for (let i = 0; i < stringCount; i++) {
+    const offIdx = pos + headerSize + i * 4;
+    if (offIdx + 4 > buf.length) { strings.push(""); continue; }
+    const strOff = buf.readUInt32LE(offIdx);
+    const strBase = pos + stringsStart + strOff;
+    if (strBase >= buf.length) { strings.push(""); continue; }
+    try {
+      if (isUtf8) {
+        let p = strBase;
+        // Skip UTF-16 char count (1 or 2 bytes)
+        let b = buf[p++];
+        if (b & 0x80) p++;
+        // Read UTF-8 byte length
+        b = buf[p++];
+        let byteLen = b & 0x7f;
+        if (b & 0x80) byteLen = (byteLen << 8) | buf[p++];
+        strings.push(buf.toString("utf8", p, p + byteLen));
+      } else {
+        let p = strBase;
+        let charLen = buf.readUInt16LE(p); p += 2;
+        if (charLen & 0x8000) {
+          charLen = ((charLen & 0x7fff) << 16) | buf.readUInt16LE(p); p += 2;
+        }
+        strings.push(buf.toString("utf16le", p, p + charLen * 2));
+      }
+    } catch { strings.push(""); }
+  }
+  return { strings, chunkSize };
+}
+
+function extractLabelFromManifest(buf: Buffer): { str?: string; resId?: number } {
+  // Binary AXML file header: type=0x0003
+  if (buf.length < 8 || buf.readUInt16LE(0) !== 0x0003) return {};
+
+  let pos = 8; // skip file header chunk
+  let strings: string[] = [];
+
+  while (pos + 8 <= buf.length) {
+    const chunkType = buf.readUInt16LE(pos);
+    const chunkSize = buf.readUInt32LE(pos + 4);
+    if (chunkSize < 8 || pos + chunkSize > buf.length) break;
+
+    if (chunkType === 0x0001) {
+      // StringPool
+      strings = parseStringPoolAt(buf, pos).strings;
+    } else if (chunkType === 0x0102) {
+      // START_ELEMENT: header(8) + lineNumber(4) + comment(4) + ns(4) + name(4) + attrExt(12)
+      const nameIdx = buf.readUInt32LE(pos + 20);
+      const elemName = strings[nameIdx] || "";
+
+      if (elemName === "application") {
+        // attrStart is relative to offset 16 (start of attrExt)
+        const attrStart = buf.readUInt16LE(pos + 24);
+        const attrCount = buf.readUInt16LE(pos + 28);
+        const attrsBase = pos + 16 + attrStart;
+
+        for (let i = 0; i < attrCount; i++) {
+          const ab = attrsBase + i * 20;
+          if (ab + 20 > buf.length) break;
+          // attribute: ns(4) + name(4) + rawValue(4) + Res_value{ size(2), res0(1), dataType(1), data(4) }
+          const attrNameIdx = buf.readUInt32LE(ab + 4);
+          if ((strings[attrNameIdx] || "") === "label") {
+            const dataType = buf.readUInt8(ab + 15);
+            const data = buf.readUInt32LE(ab + 16);
+            if (dataType === 0x03) return { str: strings[data] };       // string
+            if (dataType === 0x01 || dataType === 0x07) return { resId: data }; // ref / attr
+          }
+        }
+        return {}; // application element found but no label attr
+      }
+    }
+    pos += chunkSize;
+  }
+  return {};
+}
+
+function resolveResIdInArsc(buf: Buffer, resourceId: number): string | null {
+  if (buf.length < 12 || buf.readUInt16LE(0) !== 0x0002) return null;
+
+  const targetPkgId = (resourceId >>> 24) & 0xff;
+  const targetTypeId = (resourceId >>> 16) & 0xff; // 1-based
+  const targetEntryId = resourceId & 0xffff;
+
+  let globalStrings: string[] = [];
+  let pos = buf.readUInt16LE(2); // table header size
+
+  while (pos + 8 <= buf.length) {
+    const chunkType = buf.readUInt16LE(pos);
+    const chunkSize = buf.readUInt32LE(pos + 4);
+    if (chunkSize < 8 || pos + chunkSize > buf.length) break;
+
+    if (chunkType === 0x0001) {
+      // Global value string pool
+      globalStrings = parseStringPoolAt(buf, pos).strings;
+    } else if (chunkType === 0x0200) {
+      // Package chunk
+      const pkgId = buf.readUInt32LE(pos + 8);
+      if (pkgId !== targetPkgId) { pos += chunkSize; continue; }
+
+      const pkgHeaderSize = buf.readUInt16LE(pos + 2);
+      let pkgPos = pos + pkgHeaderSize;
+      const pkgEnd = pos + chunkSize;
+
+      while (pkgPos + 8 <= pkgEnd) {
+        const innerType = buf.readUInt16LE(pkgPos);
+        const innerSize = buf.readUInt32LE(pkgPos + 4);
+        if (innerSize < 8 || pkgPos + innerSize > pkgEnd) break;
+
+        if (innerType === 0x0201) {
+          // ResTable_type
+          const typeId = buf.readUInt8(pkgPos + 8); // 1-based
+          if (typeId === targetTypeId) {
+            const innerHeaderSize = buf.readUInt16LE(pkgPos + 2);
+            const entryCount = buf.readUInt32LE(pkgPos + 12);
+            const entriesStart = buf.readUInt32LE(pkgPos + 16);
+
+            if (targetEntryId < entryCount) {
+              const entryOffsetPos = pkgPos + innerHeaderSize + targetEntryId * 4;
+              if (entryOffsetPos + 4 > buf.length) { pkgPos += innerSize; continue; }
+              const entryOffset = buf.readUInt32LE(entryOffsetPos);
+              if (entryOffset === 0xffffffff) { pkgPos += innerSize; continue; }
+
+              const entryBase = pkgPos + entriesStart + entryOffset;
+              if (entryBase + 16 > buf.length) { pkgPos += innerSize; continue; }
+
+              const entryFlags = buf.readUInt16LE(entryBase + 2);
+              if ((entryFlags & 0x0001) === 0) {
+                // Simple (non-bag) entry — value follows immediately after 8-byte entry header
+                const valueBase = entryBase + 8;
+                if (valueBase + 8 > buf.length) { pkgPos += innerSize; continue; }
+                const dataType = buf.readUInt8(valueBase + 3);
+                const data = buf.readUInt32LE(valueBase + 4);
+                if (dataType === 0x03) {
+                  const str = globalStrings[data];
+                  if (str) return str;
+                }
+              }
+            }
+          }
+        }
+        pkgPos += innerSize;
+      }
+    }
+    pos += chunkSize;
+  }
+  return null;
+}
+
+function extractIconFromApk(zip: AdmZip): string | null {
+  const PREF_ORDER = ["xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi", "ldpi"];
+
+  // Try known paths in resolution order
+  for (const density of PREF_ORDER) {
+    for (const folder of [`res/mipmap-${density}-v4`, `res/drawable-${density}-v4`, `res/mipmap-${density}`, `res/drawable-${density}`]) {
+      const entry = zip.getEntry(`${folder}/ic_launcher.png`);
+      if (entry) return `data:image/png;base64,${entry.getData().toString("base64")}`;
+    }
+  }
+
+  // Fall back: scan all entries for ic_launcher.png (prefer higher density)
+  const candidates = zip
+    .getEntries()
+    .filter(
+      (e) =>
+        e.entryName.endsWith(".png") &&
+        e.entryName.includes("ic_launcher") &&
+        !e.entryName.includes("round") &&
+        !e.entryName.includes("foreground") &&
+        !e.entryName.includes("background")
+    )
+    .sort((a, b) => {
+      const rank = (name: string) => {
+        for (let i = 0; i < PREF_ORDER.length; i++) if (name.includes(PREF_ORDER[i])) return i;
+        return PREF_ORDER.length;
+      };
+      return rank(a.entryName) - rank(b.entryName);
+    });
+
+  if (candidates.length > 0) {
+    return `data:image/png;base64,${candidates[0].getData().toString("base64")}`;
+  }
+  return null;
+}
+
+async function fetchAppInfo(serial: string, pkg: string, apkPathOnDevice: string): Promise<AppInfo> {
+  // Get version
+  let version = "unknown";
+  try {
+    const vr = await adbs(serial, "shell", "dumpsys", "package", pkg);
+    if (vr.code === 0) {
+      const m = vr.out.match(/versionName=([^\s\n]+)/);
+      if (m) version = m[1];
+    }
+  } catch { /* ignore */ }
+
+  const fallbackName = humanizePackageName(pkg);
+  const tmpApk = path.join(os.tmpdir(), `firefly_apk_${pkg.replace(/\./g, "_")}.apk`);
+
+  try {
+    const pullR = await adbs(serial, "pull", apkPathOnDevice, tmpApk);
+    if (pullR.code !== 0) throw new Error(pullR.err || "pull failed");
+
+    const zip = new AdmZip(tmpApk);
+
+    // Extract display name
+    let displayName = fallbackName;
+    const manifestEntry = zip.getEntry("AndroidManifest.xml");
+    if (manifestEntry) {
+      const result = extractLabelFromManifest(manifestEntry.getData());
+      if (result.str) {
+        displayName = result.str;
+      } else if (result.resId !== undefined) {
+        const arscEntry = zip.getEntry("resources.arsc");
+        if (arscEntry) {
+          const resolved = resolveResIdInArsc(arscEntry.getData(), result.resId);
+          if (resolved) displayName = resolved;
+        }
+      }
+    }
+
+    const iconDataUrl = extractIconFromApk(zip);
+
+    return { package: pkg, version, displayName, iconDataUrl };
+  } catch (e) {
+    console.error(`[firefly] Failed to process APK for ${pkg}:`, e);
+    return { package: pkg, version, displayName: fallbackName, iconDataUrl: null };
+  } finally {
+    try { await fs.unlink(tmpApk); } catch { /* ignore */ }
+  }
 }

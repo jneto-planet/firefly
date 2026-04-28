@@ -74,6 +74,11 @@ contextBridge.exposeInMainWorld("firefly", {
     readImageAsDataUrl: (filePath: string) => ipcRenderer.invoke("firefly:read-image-as-data-url", filePath),
     saveAccessibilityImage: (args: { originalPath: string; base64Data: string; suffix: string; outputDir: string }) => ipcRenderer.invoke("firefly:save-accessibility-image", args),
 
+    // Apps
+    listApps: (args: { serial: string; thirdPartyOnly: boolean }) => ipcRenderer.invoke("firefly:list-apps", args),
+    uninstallApp: (args: { serial: string; packageName: string }) => ipcRenderer.invoke("firefly:uninstall-app", args),
+    installApp: (args: { serial: string; apkPath: string }) => ipcRenderer.invoke("firefly:install-app", args),
+
     // Event listeners
     onScrcpyClosed: (callback: (data: { serial: string }) => void) => {
       const listener = (_event: any, data: { serial: string }) => callback(data);
