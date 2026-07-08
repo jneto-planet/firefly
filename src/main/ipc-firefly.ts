@@ -437,6 +437,15 @@ export function registerFireflyIpc() {
     return restartApp(serial, pkg);
   });
 
+  ipcMain.handle("firefly:reboot-device", async (_e, { serial }: { serial: string }) => {
+    console.log(`[firefly] Rebooting device ${serial}`);
+    const { code, err } = await adbs(serial, "reboot");
+    if (code !== 0) {
+      throw new Error(err || `Failed to reboot device ${serial}`);
+    }
+    return true;
+  });
+
   // --- Pull XML from Device ---
   ipcMain.handle("firefly:pull-xml-from-device", async (_e, args: {
     pkg: string; relTarget: string; serial: string; defaultSavePath: string;

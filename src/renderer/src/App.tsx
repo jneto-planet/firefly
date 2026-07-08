@@ -14,6 +14,7 @@ import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
 import RecordingOptionsDialog from "./components/RecordingOptionsDialog";
 import LoggerClientParamsDialog from "./components/LoggerClientParamsDialog";
+import RebootConfirmDialog from "./components/RebootConfirmDialog";
 import { Save, XCircle } from "lucide-react";
 
 interface Device {
@@ -99,6 +100,10 @@ export default function App() {
   const [takingScreenshot, setTakingScreenshot] = React.useState(false);
   const [screenshotData, setScreenshotData] = React.useState<string | null>(null);
   const [screenshotCopied, setScreenshotCopied] = React.useState(false);
+
+  // Reboot state
+  const [showRebootConfirm, setShowRebootConfirm] = React.useState(false);
+  const [rebooting, setRebooting] = React.useState(false);
   
   // Butterfly state
   const [openingButterfly, setOpeningButterfly] = React.useState(false);
@@ -418,6 +423,25 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to launch scrcpy:", e);
+    }
+  }
+
+  async function handleConfirmReboot() {
+    const serial = currentSerial();
+    if (!serial) {
+      setShowRebootConfirm(false);
+      return;
+    }
+
+    setRebooting(true);
+    try {
+      await window.firefly.rebootDevice({ serial });
+      setShowRebootConfirm(false);
+    } catch (e) {
+      console.error("Failed to reboot device:", e);
+      alert(`Failed to reboot device: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setRebooting(false);
     }
   }
 
@@ -1381,6 +1405,8 @@ export default function App() {
           scrcpyActive={scrcpyLaunched}
           takeScreenshot={handleTakeScreenshot}
           takingScreenshot={takingScreenshot}
+          rebootDevice={() => setShowRebootConfirm(true)}
+          rebooting={rebooting}
           openButterfly={handleOpenButterfly}
           openingButterfly={openingButterfly}
           butterflyConfigured={!!butterflyPath}
@@ -1494,6 +1520,15 @@ export default function App() {
           onConfigure={handleConfigureSavePath}
           maxTimeLimit={deviceAndroidVersion && parseInt(deviceAndroidVersion) >= 9 ? "30 minutes" : "3 minutes"}
           initialOptions={recordingOptions}
+        />
+      )}
+      {showRebootConfirm && (
+        <RebootConfirmDialog
+          deviceName={deviceTitle}
+          serial={currentSerial() || ""}
+          rebooting={rebooting}
+          onConfirm={handleConfirmReboot}
+          onCancel={() => setShowRebootConfirm(false)}
         />
       )}
     </div>

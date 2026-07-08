@@ -56,6 +56,7 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
   const [error, setError] = React.useState<string | null>(null);
   const [plan, setPlan] = React.useState<FirmwarePlan | null>(null);
   const [excluded, setExcluded] = React.useState<Set<string>>(new Set());
+  const [rebootDisabled, setRebootDisabled] = React.useState<Set<string>>(new Set());
   const [running, setRunning] = React.useState(false);
   const [statuses, setStatuses] = React.useState<Record<string, BundleStatus>>({});
   const [finished, setFinished] = React.useState<{ success: boolean; message: string } | null>(null);
@@ -68,6 +69,7 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
     setError(null);
     setPlan(null);
     setExcluded(new Set());
+    setRebootDisabled(new Set());
     setRunning(false);
     setStatuses({});
     setFinished(null);
@@ -92,6 +94,7 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
       }
       setPlan({ label: result.label, tempDir: result.tempDir, bundles: result.bundles });
       setExcluded(new Set());
+      setRebootDisabled(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -122,6 +125,16 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
   const toggleExclude = (filename: string) => {
     if (running) return;
     setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(filename)) next.delete(filename);
+      else next.add(filename);
+      return next;
+    });
+  };
+
+  const toggleReboot = (filename: string) => {
+    if (running) return;
+    setRebootDisabled((prev) => {
       const next = new Set(prev);
       if (next.has(filename)) next.delete(filename);
       else next.add(filename);
@@ -168,6 +181,9 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
 
     try {
       for (const bundle of included) {
+        // A bundle's reboot step can be manually disabled from the bundle list.
+        const willReboot = bundle.reboot && !rebootDisabled.has(bundle.filename);
+
         // 1. MD5 verification
         setStatus(bundle.filename, "verifying");
         const md5res = await window.firefly.verifyFirmwareMd5({
@@ -212,14 +228,14 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
         // an error even though the install actually succeeded. For those bundles,
         // defer the failure decision until the device is back and we can verify
         // the installed version.
-        if (!installRes.success && !bundle.reboot) {
+        if (!installRes.success && !willReboot) {
           setStatus(bundle.filename, "failed", installRes.message);
           setFinished({ success: false, message: `Install failed for ${bundle.filename}: ${installRes.message}` });
           return;
         }
 
         // 4. Reboot if required
-        if (bundle.reboot) {
+        if (willReboot) {
           setStatus(bundle.filename, "rebooting");
           const rb = await window.firefly.firmwareRebootWait({ serial: s, timeoutMs: REBOOT_TIMEOUT_MS });
           if (!rb.success) {
@@ -328,9 +344,11 @@ export default function Firmware({ currentSerial }: FirmwareProps) {
                   key={bundle.filename}
                   bundle={bundle}
                   excluded={excluded.has(bundle.filename)}
+                  rebootDisabled={rebootDisabled.has(bundle.filename)}
                   status={statuses[bundle.filename]}
                   running={running}
                   onToggle={() => toggleExclude(bundle.filename)}
+                  onToggleReboot={() => toggleReboot(bundle.filename)}
                 />
               ))}
             </div>
@@ -463,15 +481,19 @@ function DropZone({
 function BundleRow({
   bundle,
   excluded,
+  rebootDisabled,
   status,
   running,
   onToggle,
+  onToggleReboot,
 }: {
   bundle: Bundle;
   excluded: boolean;
+  rebootDisabled: boolean;
   status?: BundleStatus;
   running: boolean;
   onToggle: () => void;
+  onToggleReboot: () => void;
 }) {
   return (
     <motion.div
@@ -503,13 +525,21 @@ function BundleRow({
             {bundle.filename}
           </span>
           {bundle.reboot && (
-            <span
-              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded shrink-0"
-              style={{ background: "rgba(96,165,250,0.15)", color: "#93c5fd" }}
+            <button
+              type="button"
+              onClick={onToggleReboot}
+              disabled={running}
+              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded shrink-0 transition disabled:cursor-not-allowed"
+              style={
+                rebootDisabled
+                  ? { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" }
+                  : { background: "rgba(96,165,250,0.15)", color: "#93c5fd" }
+              }
+              title={rebootDisabled ? "Reboot disabled — click to enable" : "Reboot enabled — click to disable"}
             >
               <Power className="h-2.5 w-2.5" />
-              reboot
-            </span>
+              {rebootDisabled ? "reboot off" : "reboot"}
+            </button>
           )}
         </div>
         {status?.message && (

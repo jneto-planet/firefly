@@ -13,6 +13,7 @@ import {
   HardDriveDownload,
   Waypoints,
   MonitorPlay,
+  RotateCcw,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
 import LoggerClientIcon from "./LoggerClientIcon";
@@ -48,6 +49,10 @@ interface SidebarProps {
   // Screenshot
   takeScreenshot: () => void;
   takingScreenshot: boolean;
+
+  // Reboot
+  rebootDevice: () => void;
+  rebooting: boolean;
   
   // Butterfly
   openButterfly: () => void;
@@ -210,6 +215,8 @@ export default function Sidebar({
   scrcpyActive,
   takeScreenshot,
   takingScreenshot,
+  rebootDevice,
+  rebooting,
   openButterfly,
   openingButterfly,
   butterflyConfigured,
@@ -449,6 +456,41 @@ export default function Sidebar({
                 </div>
               </TooltipTrigger>
               <TooltipContent>{isRecording ? "Stop Recording" : "Screen Recording"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={rebootDevice}
+                  disabled={!currentOnline || rebooting}
+                  className={`relative h-10 w-10 rounded-lg flex items-center justify-center ${
+                    rebooting
+                      ? "bg-white/10"
+                      : currentOnline
+                      ? "bg-white/5"
+                      : "opacity-40 cursor-not-allowed"
+                  }`}
+                >
+                  <motion.div
+                    className="w-full h-full flex items-center justify-center"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.4, delay: 0.3 }}
+                    whileHover={currentOnline && !rebooting ? { rotate: [0, -360] } : {}}
+                  >
+                    <RotateCcw
+                      className="h-4 w-4"
+                      color={rebooting ? "#FFD86A" : "#fff"}
+                    />
+                  </motion.div>
+                  {rebooting && (
+                    <span
+                      className="absolute top-1 right-1 h-2 w-2 rounded-full animate-pulse"
+                      style={{ backgroundColor: "#FFD86A" }}
+                    />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Reboot Device</TooltipContent>
             </Tooltip>
           </div>
         </div>

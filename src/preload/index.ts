@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("firefly", {
   deleteOldCccFiles: (args: any) => ipcRenderer.invoke("firefly:delete-old", args),
   pushAndReplace: (args: any) => ipcRenderer.invoke("firefly:push-replace", args),
   restartApp: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:restart", args),
+  rebootDevice: (args: { serial: string }) => ipcRenderer.invoke("firefly:reboot-device", args),
   pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => ipcRenderer.invoke("firefly:pull-xml-from-device", args),
   clearTidFromDataStore: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:clear-tid-from-datastore", args),
   launchScrcpy: (args: any) => ipcRenderer.invoke("firefly:launch-scrcpy", args),

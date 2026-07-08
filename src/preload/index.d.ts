@@ -68,6 +68,7 @@ declare global {
       deleteOldCccFiles: (args: any) => Promise<any>;
       pushAndReplace: (args: any) => Promise<{ how: string }>;
       restartApp: (args: { pkg: string; serial: string }) => Promise<boolean>;
+      rebootDevice: (args: { serial: string }) => Promise<boolean>;
       pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; message: string; savePath?: string; filePath?: string; canceled?: boolean }>;
       clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; message: string }>;
       launchScrcpy: (args: any) => Promise<boolean>;
