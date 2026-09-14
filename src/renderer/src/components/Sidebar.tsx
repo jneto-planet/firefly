@@ -11,9 +11,11 @@ import {
   Eye,
   LayoutGrid,
   HardDriveDownload,
+  Folder,
   Waypoints,
   MonitorPlay,
   RotateCcw,
+  ArrowUpCircle,
 } from "lucide-react";
 import { PiButterflyLight } from "react-icons/pi";
 import LoggerClientIcon from "./LoggerClientIcon";
@@ -33,11 +35,15 @@ interface SidebarProps {
   refreshDevices: () => void;
   
   // Navigation
-  active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware";
-  setActive: (active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware") => void;
+  active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware" | "files";
+  setActive: (active: "configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware" | "files") => void;
   
   // Settings
   setShowSettings: (show: boolean) => void;
+
+  // Updates
+  updateStatus: UpdateStatus;
+  onInstallUpdate: () => void;
   
   // Helper functions
   currentSerial: () => string | null;
@@ -199,6 +205,53 @@ function SoftwareCard({
   );
 }
 
+function UpdateButton({
+  status,
+  onInstall,
+}: {
+  status: UpdateStatus;
+  onInstall: () => void;
+}) {
+  const pending = status.state === "available" || status.state === "downloading" || status.state === "downloaded";
+  if (!pending) return null;
+
+  const busy = status.state === "downloading";
+  const label = busy ? `${status.percent}%` : "Update";
+  const tooltip = busy
+    ? `Downloading v${status.version}…`
+    : `Update to v${status.version} — Firefly will restart`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onInstall}
+          disabled={busy}
+          className="relative h-10 px-3 rounded-lg flex items-center gap-2 transition hover:bg-white/10 disabled:cursor-default"
+          style={{ background: "rgba(255,216,106,0.12)", border: "1px solid rgba(255,216,106,0.25)" }}
+        >
+          <motion.div
+            animate={busy ? { y: [0, -2, 0] } : {}}
+            transition={{ duration: 1, repeat: busy ? Infinity : 0, ease: "easeInOut" }}
+          >
+            <ArrowUpCircle className="h-4 w-4" color="#FFD86A" />
+          </motion.div>
+          <span className="text-xs font-medium" style={{ color: "#FFD86A" }}>
+            {label}
+          </span>
+          {!busy && (
+            <span
+              className="absolute -top-1 -right-1 h-2 w-2 rounded-full animate-pulse"
+              style={{ backgroundColor: "#FFD86A" }}
+            />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export default function Sidebar({
   deviceTitle,
   deviceIcon,
@@ -210,6 +263,8 @@ export default function Sidebar({
   active,
   setActive,
   setShowSettings,
+  updateStatus,
+  onInstallUpdate,
   currentSerial,
   launchScrcpy,
   scrcpyActive,
@@ -520,6 +575,12 @@ export default function Sidebar({
               onClick={() => setActive("firmware")}
             />
             <NavItem
+              label="Files"
+              icon={<Folder className="h-4 w-4" color="#fff" />}
+              active={active === "files"}
+              onClick={() => setActive("files")}
+            />
+            <NavItem
               label="Logcat"
               icon={<Terminal className="h-4 w-4" color="#fff" />}
               active={active === "logcat"}
@@ -606,7 +667,7 @@ export default function Sidebar({
       </nav>
 
       {/* Bottom actions */}
-      <div className="p-3 mt-auto flex items-center justify-start">
+      <div className="p-3 mt-auto flex items-center justify-start gap-2">
         <button
           onClick={() => setShowSettings(true)}
           className="h-10 w-10 rounded-lg flex items-center justify-center hover:bg-white/10"
@@ -620,6 +681,8 @@ export default function Sidebar({
             <Settings className="h-5 w-5" color="#fff" />
           </motion.div>
         </button>
+
+        <UpdateButton status={updateStatus} onInstall={onInstallUpdate} />
       </div>
     </aside>
     </TooltipProvider>

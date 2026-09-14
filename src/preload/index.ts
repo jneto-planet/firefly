@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("firefly", {
   restartApp: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:restart", args),
   rebootDevice: (args: { serial: string }) => ipcRenderer.invoke("firefly:reboot-device", args),
   pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => ipcRenderer.invoke("firefly:pull-xml-from-device", args),
+  downloadConfigByTid: (args: { terminalId: string; saveDir: string }) => ipcRenderer.invoke("firefly:download-config-by-tid", args),
   clearTidFromDataStore: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:clear-tid-from-datastore", args),
   launchScrcpy: (args: any) => ipcRenderer.invoke("firefly:launch-scrcpy", args),
   openButterfly: () => ipcRenderer.invoke("firefly:open-butterfly"),
@@ -42,6 +43,13 @@ contextBridge.exposeInMainWorld("firefly", {
     checkForUpdates: () => ipcRenderer.invoke("firefly:check-for-updates"),
     getAppVersion: () => ipcRenderer.invoke("firefly:get-app-version"),
     installUpdate: () => ipcRenderer.invoke("firefly:install-update"),
+    getUpdateStatus: () => ipcRenderer.invoke("firefly:get-update-status"),
+    downloadAndInstallUpdate: () => ipcRenderer.invoke("firefly:download-and-install-update"),
+    onUpdateStatus: (callback: (s: any) => void) => {
+      const listener = (_event: any, s: any) => callback(s);
+      ipcRenderer.on("firefly:update-status", listener);
+      return () => ipcRenderer.removeListener("firefly:update-status", listener);
+    },
     
     // ADB Diagnostics
     testAdb: () => ipcRenderer.invoke("firefly:test-adb"),
@@ -82,6 +90,12 @@ contextBridge.exposeInMainWorld("firefly", {
     uninstallApp: (args: { serial: string; packageName: string }) => ipcRenderer.invoke("firefly:uninstall-app", args),
     installApp: (args: { serial: string; apkPath: string; allowDowngrade?: boolean; packageName?: string }) => ipcRenderer.invoke("firefly:install-app", args),
     checkApkVersion: (args: { serial: string; apkPath: string }) => ipcRenderer.invoke("firefly:check-apk-version", args),
+
+    // Device files
+    fsList: (args: { serial: string; path: string }) => ipcRenderer.invoke("firefly:fs-list", args),
+    fsDelete: (args: { serial: string; path: string; isDirectory: boolean }) => ipcRenderer.invoke("firefly:fs-delete", args),
+    fsPull: (args: { serial: string; path: string; isDirectory: boolean }) => ipcRenderer.invoke("firefly:fs-pull", args),
+    fsPush: (args: { serial: string; remoteDir: string; localPaths?: string[] }) => ipcRenderer.invoke("firefly:fs-push", args),
 
     // Firmware
     validateFirmware: (args: { zipPath: string }) => ipcRenderer.invoke("firefly:firmware-validate", args),

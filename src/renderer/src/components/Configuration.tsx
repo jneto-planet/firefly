@@ -12,6 +12,7 @@ import {
   Folder,
   FileText,
   Upload,
+  Download,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./Tooltip";
@@ -50,7 +51,12 @@ interface ConfigurationProps {
   currentSerial: () => string | null;
   onSend: () => void;
   onGetConfigFromTerminal: () => void;
-  
+
+  // Download config by TID
+  tid: string;
+  setTid: (tid: string) => void;
+  onDownloadAndSendConfig: () => void;
+
   // Configuration settings
   onOpenConfigSettings: () => void;
 }
@@ -78,12 +84,25 @@ export default function Configuration({
   currentSerial,
   onSend,
   onGetConfigFromTerminal,
+  tid,
+  setTid,
+  onDownloadAndSendConfig,
   onOpenConfigSettings,
 }: ConfigurationProps) {
   const serial = currentSerial();
   const xml = filteredXml();
   const canSend = !!serial && selectedPath != null && !busy;
   const canGetConfig = !!serial && !busy;
+  const canDownloadTid = !!serial && tid.trim().length > 0 && !!dir3cxml && !busy;
+
+  // TID download popover
+  const [showTidPopover, setShowTidPopover] = React.useState(false);
+
+  const handleDownloadAndSend = () => {
+    if (!canDownloadTid) return;
+    setShowTidPopover(false);
+    onDownloadAndSendConfig();
+  };
 
   // State for expanded folders
   const [expandedFolders, setExpandedFolders] = React.useState<Set<string>>(new Set());
@@ -351,37 +370,111 @@ export default function Configuration({
 
         {/* Bottom: send panel */}
         <section className="pt-4">
-          <div className="flex items-center justify-between">
-            {/* Get Config from Terminal button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onGetConfigFromTerminal}
-                  disabled={!canGetConfig}
-                  className="px-4 py-3 rounded-2xl flex items-center justify-center hover:bg-white/5 shrink-0"
-                  style={{ 
-                    opacity: busy ? 0.5 : 1
-                  }}
-                >
-                  <motion.div
-                    className="w-full h-full flex items-center justify-center"
-                    whileHover={canGetConfig ? { y: [0, -4, 0] } : {}}
-                    transition={{ duration: 0.4 }}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {/* Get Config from Terminal button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onGetConfigFromTerminal}
+                    disabled={!canGetConfig}
+                    className="px-4 py-3 rounded-2xl flex items-center justify-center hover:bg-white/5 shrink-0"
+                    style={{ 
+                      opacity: busy ? 0.5 : 1
+                    }}
                   >
-                    <Upload 
-                      className="h-5 w-5" 
-                      color={canGetConfig ? "#FFD86A" : "rgba(255,255,255,0.4)"}
+                    <motion.div
+                      className="w-full h-full flex items-center justify-center"
+                      whileHover={canGetConfig ? { y: [0, -4, 0] } : {}}
+                      transition={{ duration: 0.4 }}
+                    >
+                      <Upload 
+                        className="h-5 w-5" 
+                        color={canGetConfig ? "#FFD86A" : "rgba(255,255,255,0.4)"}
+                      />
+                    </motion.div>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Download config from terminal</TooltipContent>
+              </Tooltip>
+
+              {/* Download config by TID */}
+              <div className="relative">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setShowTidPopover((v) => !v)}
+                      disabled={busy}
+                      className="px-4 py-3 rounded-2xl flex items-center justify-center hover:bg-white/5 shrink-0"
+                      style={{ opacity: busy ? 0.5 : 1 }}
+                    >
+                      <Download
+                        className="h-5 w-5"
+                        color={!busy ? "#FFD86A" : "rgba(255,255,255,0.4)"}
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download configuration from the server</TooltipContent>
+                </Tooltip>
+
+                {showTidPopover && (
+                  <>
+                    {/* Click-away backdrop */}
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowTidPopover(false)}
                     />
-                  </motion.div>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Download config from terminal</TooltipContent>
-            </Tooltip>
+                    <motion.div
+                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute bottom-full left-0 mb-2 z-50 w-64 rounded-2xl p-4"
+                      style={{
+                        background: "#0b1720",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                      }}
+                    >
+                      <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.6)" }}>
+                        Download configuration from the server
+                      </p>
+                      <input
+                        placeholder="Enter TID"
+                        value={tid}
+                        inputMode="numeric"
+                        maxLength={8}
+                        autoFocus
+                        onChange={(e) => setTid(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleDownloadAndSend();
+                          if (e.key === "Escape") setShowTidPopover(false);
+                        }}
+                        disabled={busy}
+                        className="w-full px-3 py-2.5 rounded-xl outline-none text-sm mb-3"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
+                      />
+                      <button
+                        onClick={handleDownloadAndSend}
+                        disabled={!canDownloadTid}
+                        className="w-full px-4 py-2.5 rounded-xl flex items-center justify-center gap-2"
+                        style={{
+                          background: canDownloadTid ? ACCENT : "rgba(255,255,255,0.08)",
+                          color: canDownloadTid ? "#1a1a1a" : "rgba(255,255,255,0.4)",
+                        }}
+                      >
+                        <Download className="h-4 w-4" />
+                        {busy ? "Sending…" : "Download & Send"}
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </div>
+            </div>
 
             {/* Send button */}
             <button
               disabled={!canSend}
-              onClick={onSend}
+              onClick={() => onSend()}
               className="px-6 py-3 rounded-2xl flex items-center gap-2"
               style={{
                 background: canSend ? ACCENT : "rgba(255,255,255,0.08)",

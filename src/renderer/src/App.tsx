@@ -9,6 +9,7 @@ import VideoGenerator from "./components/VideoGenerator";
 import AccessibilityConverter from "./components/AccessibilityConverter";
 import Apps from "./components/Apps";
 import Firmware from "./components/Firmware";
+import Files from "./components/Files";
 import { prefetchApps } from "./lib/appsCache";
 import ScreenshotDialog from "./components/ScreenshotDialog";
 import ConfigurationSettingsDialog from "./components/ConfigurationSettingsDialog";
@@ -59,12 +60,15 @@ export default function App() {
   const [filter, setFilter] = React.useState<string>("");
   const [currentDir, setCurrentDir] = React.useState<string>("");
 
+  // Terminal ID (TID) used to download a configuration from the TMS server
+  const [tid, setTid] = React.useState<string>("");
+
   const [busy, setBusy] = React.useState<boolean>(false);
   const [status, setStatus] = React.useState<string>("Loading...");
 
   // UI shell
   const [deviceMenuOpen, setDeviceMenuOpen] = React.useState(false);
-  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware">("configuration");
+  const [active, setActive] = React.useState<"configuration" | "logcat" | "video-generator" | "accessibility" | "apps" | "firmware" | "files">("configuration");
 
   // Settings dialog
   const [showSettings, setShowSettings] = React.useState(false);
@@ -87,6 +91,7 @@ export default function App() {
   const [checkingForUpdates, setCheckingForUpdates] = React.useState<boolean>(false);
   const [updateAvailable, setUpdateAvailable] = React.useState<boolean>(false);
   const [updateVersion, setUpdateVersion] = React.useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = React.useState<UpdateStatus>({ state: "idle", version: null, percent: 0 });
 
   // Splash screen
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
@@ -402,6 +407,21 @@ export default function App() {
 
   function currentSerial(): string | null {
     return selectedSerial || null;
+  }
+
+  // Update availability is pushed from the main process so users don't have to
+  // discover it through Settings.
+  React.useEffect(() => {
+    window.firefly.getUpdateStatus().then(setUpdateStatus).catch(() => {});
+    return window.firefly.onUpdateStatus(setUpdateStatus);
+  }, []);
+
+  async function handleInstallUpdate() {
+    try {
+      await window.firefly.downloadAndInstallUpdate();
+    } catch (e) {
+      console.error("Failed to install update:", e);
+    }
   }
 
   async function handleLaunchScrcpy() {
@@ -796,11 +816,12 @@ export default function App() {
     }
   }
 
-  async function onSend() {
+  async function onSend(pathOverride?: string) {
     const serial = currentSerial();
-    if (!serial || !selectedPath) return;
+    const pathToSend = pathOverride ?? selectedPath;
+    if (!serial || !pathToSend) return;
 
-    // selectedPath is the full path to the file, we can use it directly
+    // pathToSend is the full path to the file, we can use it directly
     setBusy(true);
     setStatus("Sending…");
 
@@ -833,7 +854,7 @@ export default function App() {
       // 3. Push new config
       setStatus("Sending new configuration…");
       await window.firefly.pushAndReplace({
-        localPath: selectedPath,
+        localPath: pathToSend,
         pkg: TARGET_PACKAGE,
         relTarget: TARGET_XML_PATH,
         sdcardTemp: TEMP_XML_PATH,
@@ -890,6 +911,49 @@ export default function App() {
       console.error("handleGetConfigFromTerminal failed:", e);
       alert(`Failed to download configuration:\n\n${e.message || e}`);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownloadAndSendConfig() {
+    const serial = currentSerial();
+    if (!serial) return;
+
+    const terminalId = tid.trim();
+    if (!terminalId) {
+      alert("Please enter a Terminal ID (TID) first.");
+      return;
+    }
+
+    const saveDir = dir3cxml;
+    if (!saveDir) {
+      alert("Please set the 3cxml folder in Configuration Settings first.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus(`Downloading configuration for TID ${terminalId}…`);
+
+    try {
+      // 1. Download the configuration from the TMS server and store it locally
+      const result = await window.firefly.downloadConfigByTid({ terminalId, saveDir });
+
+      if (!result.success || !result.filePath) {
+        throw new Error("Download did not return a file");
+      }
+
+      setStatus("Configuration downloaded. Sending to device…");
+
+      // Reflect the new file in the list and select it
+      await refreshXml();
+      setSelectedPath(result.filePath);
+
+      // 2. Send the downloaded configuration to the device
+      await onSend(result.filePath);
+    } catch (e: any) {
+      setStatus(`Download failed: ${e.message || e}`);
+      console.error("handleDownloadAndSendConfig failed:", e);
+      alert(`Failed to download and send configuration:\n\n${e.message || e}`);
       setBusy(false);
     }
   }
@@ -1400,6 +1464,8 @@ export default function App() {
           active={active}
           setActive={setActive}
           setShowSettings={setShowSettings}
+          updateStatus={updateStatus}
+          onInstallUpdate={handleInstallUpdate}
           currentSerial={currentSerial}
           launchScrcpy={handleLaunchScrcpy}
           scrcpyActive={scrcpyLaunched}
@@ -1448,6 +1514,9 @@ export default function App() {
               currentSerial={currentSerial}
               onSend={onSend}
               onGetConfigFromTerminal={handleGetConfigFromTerminal}
+              tid={tid}
+              setTid={setTid}
+              onDownloadAndSendConfig={handleDownloadAndSendConfig}
               onOpenConfigSettings={() => setShowConfigSettings(true)}
             />
           )}
@@ -1474,6 +1543,11 @@ export default function App() {
           )}
           {active === "firmware" && (
             <Firmware
+              currentSerial={currentSerial}
+            />
+          )}
+          {active === "files" && (
+            <Files
               currentSerial={currentSerial}
             />
           )}

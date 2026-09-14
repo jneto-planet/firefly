@@ -2,6 +2,13 @@
 export {};
 
 declare global {
+  interface UpdateStatus {
+    state: "idle" | "checking" | "available" | "downloading" | "downloaded" | "error";
+    version: string | null;
+    percent: number;
+    message?: string;
+  }
+
   interface Window {
     firefly: {
       // --- Config ---
@@ -23,6 +30,7 @@ declare global {
         recording_resolution?: number;
         recording_show_taps?: boolean;
         recording_save_path?: string;
+        file_shortcuts?: Array<{ label: string; path: string }>;
       }>;
       setConfig: (cfg: Partial<{
         dir_3cxml: string;
@@ -42,6 +50,7 @@ declare global {
         recording_resolution?: number;
         recording_show_taps?: boolean;
         recording_save_path?: string;
+        file_shortcuts?: Array<{ label: string; path: string }>;
       }>) => Promise<boolean>;
 
       // --- Files / XML ---
@@ -70,6 +79,7 @@ declare global {
       restartApp: (args: { pkg: string; serial: string }) => Promise<boolean>;
       rebootDevice: (args: { serial: string }) => Promise<boolean>;
       pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; message: string; savePath?: string; filePath?: string; canceled?: boolean }>;
+      downloadConfigByTid: (args: { terminalId: string; saveDir: string }) => Promise<{ success: boolean; filePath: string; fileName: string }>;
       clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; message: string }>;
       launchScrcpy: (args: any) => Promise<boolean>;
       openButterfly: () => Promise<boolean>;
@@ -92,6 +102,9 @@ declare global {
       checkForUpdates: () => Promise<any>;
       getAppVersion: () => Promise<string>;
       installUpdate: () => Promise<void>;
+      getUpdateStatus: () => Promise<UpdateStatus>;
+      downloadAndInstallUpdate: () => Promise<void>;
+      onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
 
       // --- ADB Diagnostics ---
       testAdb: () => Promise<any>;
@@ -146,6 +159,24 @@ declare global {
         installedVersionName?: string | null;
         isDowngrade?: boolean;
       }>;
+
+      // --- Device files ---
+      fsList: (args: { serial: string; path: string }) => Promise<{
+        success: boolean;
+        error?: string;
+        entries: Array<{
+          name: string;
+          path: string;
+          type: 'file' | 'directory' | 'link' | 'other';
+          size: number | null;
+          modified: string | null;
+          permissions: string;
+          linkTarget: string | null;
+        }>;
+      }>;
+      fsDelete: (args: { serial: string; path: string; isDirectory: boolean }) => Promise<{ success: boolean; message: string }>;
+      fsPull: (args: { serial: string; path: string; isDirectory: boolean }) => Promise<{ success: boolean; message: string; canceled?: boolean; filePath?: string }>;
+      fsPush: (args: { serial: string; remoteDir: string; localPaths?: string[] }) => Promise<{ success: boolean; message: string; canceled?: boolean }>;
 
       // --- Firmware ---
       validateFirmware: (args: { zipPath: string }) => Promise<{

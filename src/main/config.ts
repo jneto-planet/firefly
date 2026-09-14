@@ -22,6 +22,7 @@ export type FireflyConfig = {
   recording_resolution?: number;
   recording_show_taps?: boolean;
   recording_save_path?: string;
+  file_shortcuts?: Array<{ label: string; path: string }>;
 };
 
 const DEFAULTS: FireflyConfig = {
@@ -43,6 +44,7 @@ const DEFAULTS: FireflyConfig = {
   recording_resolution: 100,
   recording_show_taps: true,
   recording_save_path: "",
+  file_shortcuts: [],
 };
 
 const CONFIG_PATH = path.join(app.getPath("userData"), "firefly-config.json");

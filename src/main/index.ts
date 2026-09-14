@@ -3,7 +3,7 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import { registerFireflyIpc } from "./ipc-firefly";
-import { AppUpdater } from "./updater";
+import { initAutoUpdater } from "./updater";
 
 const isDev = !app.isPackaged;
 
@@ -117,7 +117,7 @@ app.whenReady().then(() => {
   
   // Initialize auto-updater (only in production)
   if (!isDev) {
-    new AppUpdater();
+    initAutoUpdater();
     console.log('[main] Auto-updater initialized');
   } else {
     console.log('[main] Auto-updater disabled in development mode');

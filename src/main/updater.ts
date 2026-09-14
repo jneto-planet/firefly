@@ -1,102 +1,102 @@
 // src/main/updater.ts
 import { autoUpdater } from "electron-updater";
-import { BrowserWindow, dialog } from "electron";
+import { BrowserWindow, app } from "electron";
 
-export class AppUpdater {
-  constructor() {
-    // Configure auto-updater - but don't automatically check
-    // autoUpdater.checkForUpdatesAndNotify(); // Removed automatic checking
-    
-    // Debug: Log the feed URL that electron-updater will use
-    console.log('[updater] Feed URL:', autoUpdater.getFeedURL());
-    
-    // Set up event listeners
-    this.setupEventListeners();
+export type UpdateState = "idle" | "checking" | "available" | "downloading" | "downloaded" | "error";
+
+export interface UpdateStatus {
+  state: UpdateState;
+  version: string | null;
+  percent: number;
+  message?: string;
+}
+
+const CHECK_DELAY_MS = 8_000;
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+let status: UpdateStatus = { state: "idle", version: null, percent: 0 };
+let installWhenDownloaded = false;
+let initialized = false;
+
+function setStatus(patch: Partial<UpdateStatus>) {
+  status = { ...status, ...patch };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send("firefly:update-status", status);
   }
+}
 
-  private setupEventListeners() {
-    // When update is available
-    autoUpdater.on('update-available', (info) => {
-      console.log('[updater] Update available:', info.version);
-      this.showUpdateAvailableDialog(info);
-    });
+export function getUpdateStatus(): UpdateStatus {
+  return status;
+}
 
-    // When update is not available
-    autoUpdater.on('update-not-available', (info) => {
-      console.log('[updater] Update not available:', info.version);
-    });
+export function initAutoUpdater() {
+  if (initialized) return;
+  initialized = true;
 
-    // When update is downloaded
-    autoUpdater.on('update-downloaded', (info) => {
-      console.log('[updater] Update downloaded:', info.version);
-      this.showUpdateReadyDialog(info);
-    });
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
 
-    // Download progress
-    autoUpdater.on('download-progress', (progressObj) => {
-      const percent = Math.round(progressObj.percent);
-      console.log(`[updater] Download progress: ${percent}%`);
-      
-      // Update window title with progress
-      const windows = BrowserWindow.getAllWindows();
-      if (windows.length > 0) {
-        windows[0].setTitle(`Firefly - Downloading update ${percent}%`);
-      }
-    });
+  console.log("[updater] Feed URL:", autoUpdater.getFeedURL());
 
-    // Error handling
-    autoUpdater.on('error', (error) => {
-      console.error('[updater] Error:', error);
-    });
+  autoUpdater.on("checking-for-update", () => setStatus({ state: "checking" }));
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("[updater] Update available:", info.version);
+    setStatus({ state: "available", version: info.version, percent: 0, message: undefined });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    setStatus({ state: "idle", version: null, percent: 0, message: undefined });
+  });
+
+  autoUpdater.on("download-progress", (p) => {
+    setStatus({ state: "downloading", percent: Math.round(p.percent) });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log("[updater] Update downloaded:", info.version);
+    setStatus({ state: "downloaded", version: info.version, percent: 100 });
+    if (installWhenDownloaded) {
+      installWhenDownloaded = false;
+      // Let the status event reach the renderer before the app quits.
+      setTimeout(() => autoUpdater.quitAndInstall(), 500);
+    }
+  });
+
+  autoUpdater.on("error", (error) => {
+    console.error("[updater] Error:", error);
+    installWhenDownloaded = false;
+    setStatus({ state: "error", percent: 0, message: error?.message ?? String(error) });
+  });
+
+  setTimeout(() => void checkForUpdates(), CHECK_DELAY_MS);
+  setInterval(() => void checkForUpdates(), CHECK_INTERVAL_MS);
+}
+
+export async function checkForUpdates(): Promise<UpdateStatus> {
+  if (!app.isPackaged) return status;
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch {
+    // Surfaced through the "error" event listener.
   }
+  return status;
+}
 
-  private showUpdateAvailableDialog(info: any) {
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    
-    dialog.showMessageBox(focusedWindow || BrowserWindow.getAllWindows()[0], {
-      type: 'info',
-      title: 'Update Available',
-      message: `A new version (${info.version}) is available!`,
-      detail: 'Would you like to download and install this update?',
-      buttons: ['Download Update', 'Skip This Version', 'Remind Me Later']
-    }).then((result) => {
-      if (result.response === 0) {
-        // User clicked "Download Update"
-        autoUpdater.downloadUpdate();
-      }
-      // If user clicked "Skip This Version" or "Remind Me Later", do nothing
-    });
-  }
+/** Downloads the pending update and restarts into it once ready. */
+export function downloadAndInstall() {
+  if (!app.isPackaged) return;
 
-  private showUpdateReadyDialog(info: any) {
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    
-    dialog.showMessageBox(focusedWindow || BrowserWindow.getAllWindows()[0], {
-      type: 'info',
-      title: 'Update Ready',
-      message: `Update ${info.version} has been downloaded and is ready to install.`,
-      detail: 'The application will restart to apply the update.',
-      buttons: ['Restart Now', 'Later']
-    }).then((result) => {
-      if (result.response === 0) {
-        // User clicked "Restart Now"
-        autoUpdater.quitAndInstall();
-      }
-    });
+  if (status.state === "downloaded") {
+    autoUpdater.quitAndInstall();
+    return;
   }
+  if (status.state === "downloading") return;
 
-  // Manual check for updates (can be called from menu)
-  public checkForUpdates() {
-    return autoUpdater.checkForUpdates();
-  }
-
-  // Get current version
-  public getCurrentVersion(): string {
-    return autoUpdater.currentVersion?.version || '1.0.0';
-  }
-
-  // Check if auto-updater is supported (i.e., we're in a packaged app)
-  public isUpdateSupported(): boolean {
-    return autoUpdater.isUpdaterActive();
-  }
+  installWhenDownloaded = true;
+  setStatus({ state: "downloading", percent: 0, message: undefined });
+  autoUpdater.downloadUpdate().catch((e) => {
+    installWhenDownloaded = false;
+    setStatus({ state: "error", percent: 0, message: e?.message ?? String(e) });
+  });
 }

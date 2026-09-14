@@ -2,17 +2,23 @@
 import { ipcMain, BrowserWindow, dialog, shell, app } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createWriteStream } from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import AdmZip from "adm-zip";
 import { loadConfig, saveConfig } from "./config";
 import { buildLoggerClientArgs } from "./logger-client";
 import { autoUpdater } from "electron-updater";
+import { getUpdateStatus, downloadAndInstall } from "./updater";
 import { adb, adbs, parseDevices, testAdb, testScrcpy, setCustomAdbPath, detectScrcpyPath, launchScrcpy, getAdbPath, restartApp } from "./adb";
 import { spawn, ChildProcess } from "node:child_process";
 
 // Track active screen recordings
 const activeRecordings = new Map<string, ChildProcess>();
+
+// Base URL of the TMS server used to download terminal configurations by TID.
+// The terminalId is appended as a query parameter.
+const CONFIG_SERVER_BASE_URL = "https://194.7.101.45/ccctmsservices/services/integra/config/terminal";
 
 /**
  * Get the path to the bundled ffmpeg executable
@@ -37,6 +43,202 @@ function getFfmpegPath(): string {
   
   // Fallback to system ffmpeg
   return "ffmpeg";
+}
+
+// ─── Device file explorer helpers ────────────────────────────────────────────
+
+export interface DeviceFileEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory" | "link" | "other";
+  size: number | null;
+  modified: string | null;
+  permissions: string;
+  linkTarget: string | null;
+}
+
+/** Wrap a device path in single quotes so the on-device shell treats it literally. */
+function shellQuote(p: string): string {
+  return `'${p.replace(/'/g, `'\\''`)}'`;
+}
+
+function firstLine(s: string): string {
+  return (s || "").split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "";
+}
+
+function basenamePosix(p: string): string {
+  const trimmed = p.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1) || "/";
+}
+
+function joinPosix(dir: string, name: string): string {
+  return `${dir.replace(/\/+$/, "")}/${name}`;
+}
+
+/** A trailing slash makes `ls` follow symlinked directories instead of listing the link. */
+function asListablePath(p: string): string {
+  return `${(p || "/").replace(/\/+$/, "")}/`;
+}
+
+function doubleQuote(s: string): string {
+  return `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+/** App-private storage is only reachable through `run-as` or root. */
+function appPackageForPath(p: string): string | null {
+  const m = p.match(/^\/data\/(?:data|user\/\d+|user_de\/\d+)\/([^/]+)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Build the escalation ladder Android Studio uses for a device shell command:
+ * plain shell → `run-as <package>` for app-private paths → root.
+ */
+function escalationCommands(inner: string, remotePath: string): string[] {
+  const pkg = appPackageForPath(remotePath);
+  return [
+    inner,
+    ...(pkg ? [`run-as ${pkg} ${inner}`] : []),
+    `su -c ${doubleQuote(inner)}`,
+  ];
+}
+
+function isDenied(r: { code: number; out: string; err: string }): boolean {
+  return r.code !== 0 || /permission denied|operation not permitted|not executable|inaccessible|run-as:|su:/i.test(r.err);
+}
+
+/**
+ * Directories that are traversable (+x) but not readable (-r) for the shell user,
+ * so their contents have to be discovered rather than listed.
+ */
+const PROBE_CHILDREN: Record<string, string[]> = {
+  "/data": ["adb", "app", "app-private", "data", "local", "media", "misc", "system", "user", "user_de", "vendor"],
+  "/data/local": ["tmp"],
+};
+
+const APP_DATA_ROOT_RE = /^\/data\/(?:data|user\/(\d+)|user_de\/(\d+))$/;
+
+/** Returns the Android user id when the path is an app-data root, otherwise null. */
+function appDataRootUser(p: string): string | null {
+  const m = (p || "").replace(/\/+$/, "").match(APP_DATA_ROOT_RE);
+  if (!m) return null;
+  return m[1] ?? m[2] ?? "0";
+}
+
+function syntheticDir(dir: string, name: string, permissions: string): DeviceFileEntry {
+  return {
+    name,
+    path: joinPosix(dir, name),
+    type: "directory",
+    size: null,
+    modified: null,
+    permissions,
+    linkTarget: null,
+  };
+}
+
+/** `/data/data` is root-only, so derive its contents from the package manager. */
+async function listPackageDirs(serial: string, dir: string, user: string): Promise<DeviceFileEntry[]> {
+  let r = await adbs(serial, "shell", `pm list packages --user ${user}`);
+  if (r.code !== 0 || !r.out.includes("package:")) {
+    r = await adbs(serial, "shell", "pm list packages");
+  }
+  if (!r.out.includes("package:")) return [];
+
+  return r.out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("package:"))
+    .map((l) => l.slice("package:".length).trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .map((pkg) => syntheticDir(dir, pkg, "drwx------"));
+}
+
+/** Discover children of an unreadable directory by stat-ing well-known names. */
+async function probeKnownChildren(serial: string, dir: string): Promise<DeviceFileEntry[]> {
+  const names = PROBE_CHILDREN[(dir || "").replace(/\/+$/, "")];
+  if (!names) return [];
+
+  const script = names
+    .map((n) => `[ -d ${shellQuote(joinPosix(dir, n))} ] && echo ${n}`)
+    .join("; ");
+  const r = await adbs(serial, "shell", script);
+
+  const found = new Set(r.out.split("\n").map((l) => l.trim()).filter(Boolean));
+  return names.filter((n) => found.has(n)).map((n) => syntheticDir(dir, n, "d---------"));
+}
+
+/** Stream `adb exec-out` straight to disk so binary payloads stay intact. */
+function adbExecOutToFile(serial: string, shellCommand: string, destination: string): Promise<{ code: number; err: string }> {
+  return new Promise((resolve) => {
+    const sink = createWriteStream(destination);
+    const p = spawn(getAdbPath(), ["-s", serial, "exec-out", shellCommand], { stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    p.stdout.pipe(sink);
+    p.stderr.on("data", (d) => (err += d.toString()));
+    p.on("error", (e) => { sink.end(); resolve({ code: 1, err: e.message }); });
+    p.on("close", (code) => { sink.end(() => resolve({ code: code ?? 1, err: err.trim() })); });
+  });
+}
+
+/**
+ * Parse `ls -la` output from the device. Handles toybox/toolbox variations where
+ * the size column may be absent (device nodes) or the date format differs.
+ */
+function parseLsOutput(raw: string, dir: string): DeviceFileEntry[] {
+  const entries: DeviceFileEntry[] = [];
+
+  for (const rawLine of raw.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (!line.trim() || /^total\s/i.test(line.trim())) continue;
+
+    const head = line.match(/^([bcdlps-])(\S{9,})\s+\d+\s+\S+\s+\S+\s+(.*)$/);
+    if (!head) continue;
+
+    const [, typeChar, permBits, rest] = head;
+
+    // rest = [major, minor | size] <date> <time> <name>
+    const tail =
+      rest.match(/^(?:\d+,\s+\d+|(\d+))\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s+(.+)$/) ??
+      rest.match(/^(?:\d+,\s+\d+|(\d+))\s+(\w{3}\s+\d{1,2}\s+[\d:]+)\s+(.+)$/);
+    if (!tail) continue;
+
+    const [, sizeText, modified, nameField] = tail;
+
+    let name = nameField;
+    let linkTarget: string | null = null;
+    if (typeChar === "l") {
+      const arrow = nameField.indexOf(" -> ");
+      if (arrow !== -1) {
+        name = nameField.slice(0, arrow);
+        linkTarget = nameField.slice(arrow + 4);
+      }
+    }
+    // ls echoes the argument path verbatim for non-directory targets.
+    name = basenamePosix(name);
+    if (name === "." || name === "..") continue;
+
+    entries.push({
+      name,
+      path: joinPosix(dir, name),
+      type: typeChar === "d" ? "directory" : typeChar === "l" ? "link" : typeChar === "-" ? "file" : "other",
+      size: sizeText ? Number(sizeText) : null,
+      modified: modified ?? null,
+      permissions: `${typeChar}${permBits}`,
+      linkTarget,
+    });
+  }
+
+  entries.sort((a, b) => {
+    const aDir = a.type === "directory" ? 0 : 1;
+    const bDir = b.type === "directory" ? 0 : 1;
+    if (aDir !== bDir) return aDir - bDir;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+
+  return entries;
 }
 
 export function registerFireflyIpc() {
@@ -491,6 +693,71 @@ export function registerFireflyIpc() {
       console.error(`[firefly] Failed to pull XML:`, error);
       throw error;
     }
+  });
+
+  // --- Download config from TMS server by TID (terminalId) ---
+  ipcMain.handle("firefly:download-config-by-tid", async (_e, args: {
+    terminalId: string; saveDir: string;
+  }) => {
+    const https = await import("node:https");
+    const { terminalId, saveDir } = args;
+
+    const tid = (terminalId || "").trim();
+    if (!tid) {
+      throw new Error("Terminal ID (TID) is required");
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(tid)) {
+      throw new Error("Terminal ID (TID) contains invalid characters");
+    }
+    if (!saveDir) {
+      throw new Error("No save directory configured. Please set the 3cxml folder first.");
+    }
+
+    const url = `${CONFIG_SERVER_BASE_URL}?terminalId=${encodeURIComponent(tid)}`;
+    console.log(`[firefly] Downloading config for TID ${tid} from ${url}`);
+
+    const body = await new Promise<string>((resolve, reject) => {
+      const req = https.request(
+        url,
+        {
+          method: "GET",
+          // The TMS server is reached by IP and serves a self-signed certificate,
+          // so certificate validation is disabled for this specific request.
+          rejectUnauthorized: false,
+          timeout: 30000,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            const data = Buffer.concat(chunks).toString("utf-8");
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(data);
+            } else {
+              reject(new Error(`Server responded with HTTP ${res.statusCode}${data ? `: ${data.slice(0, 200)}` : ""}`));
+            }
+          });
+        }
+      );
+      req.on("timeout", () => req.destroy(new Error("Request timed out")));
+      req.on("error", (err) => reject(err));
+      req.end();
+    });
+
+    if (!body || body.trim().length === 0) {
+      throw new Error("Server returned an empty configuration");
+    }
+    if (!body.trim().startsWith("<")) {
+      throw new Error("Server did not return a valid XML configuration");
+    }
+
+    const fileName = `cccterminal-3cixml-${tid}.xml`;
+    const filePath = path.join(saveDir, fileName);
+    await fs.mkdir(saveDir, { recursive: true });
+    await fs.writeFile(filePath, body, "utf-8");
+    console.log(`[firefly] Config for TID ${tid} saved to ${filePath}`);
+
+    return { success: true, filePath, fileName };
   });
 
   ipcMain.handle("firefly:launch-scrcpy", async (event, { serial }: { serial: string }) => {
@@ -1193,6 +1460,12 @@ export function registerFireflyIpc() {
     return app.getVersion();
   });
 
+  ipcMain.handle("firefly:get-update-status", async () => getUpdateStatus());
+
+  ipcMain.handle("firefly:download-and-install-update", async () => {
+    downloadAndInstall();
+  });
+
   ipcMain.handle("firefly:install-update", async () => {
     if (app.isPackaged) {
       autoUpdater.quitAndInstall();
@@ -1581,6 +1854,179 @@ export function registerFireflyIpc() {
       };
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  // ─── Device file explorer ──────────────────────────────────────────────────
+
+  ipcMain.handle("firefly:fs-list", async (_e, { serial, path: remotePath }: { serial: string; path: string }) => {
+    try {
+      const target = remotePath || "/";
+      const inner = `ls -la ${shellQuote(asListablePath(target))}`;
+      const errors: string[] = [];
+
+      for (const cmd of escalationCommands(inner, target)) {
+        const r = await adbs(serial, "shell", cmd);
+        const entries = parseLsOutput(`${r.out}\n${r.err}`, target);
+
+        // ls reports unreadable individual entries on stderr and exits non-zero while
+        // still listing everything else, so only escalate when nothing could be read.
+        if (entries.length > 0) return { success: true, entries };
+
+        const problem = firstLine(r.err || r.out);
+        if (r.code === 0 && !problem) return { success: true, entries: [] };
+        errors.push(problem);
+      }
+
+      // Fall back to synthesizing contents for directories the shell may traverse
+      // but not read — this is how /data and /data/data stay browsable.
+      const user = appDataRootUser(target);
+      if (user) {
+        const packages = await listPackageDirs(serial, target, user);
+        if (packages.length > 0) return { success: true, entries: packages };
+      }
+      const probed = await probeKnownChildren(serial, target);
+      if (probed.length > 0) return { success: true, entries: probed };
+
+      const pkg = appPackageForPath(target);
+      const error = (pkg && errors[1]) || errors[0] || "Failed to list directory";
+      return {
+        success: false,
+        error: pkg
+          ? `${error} — "${pkg}" is not debuggable and the device is not rooted`
+          : error,
+        entries: [],
+      };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e), entries: [] };
+    }
+  });
+
+  ipcMain.handle("firefly:fs-delete", async (_e, { serial, path: remotePath, isDirectory }: { serial: string; path: string; isDirectory: boolean }) => {
+    try {
+      if (!remotePath || remotePath === "/") {
+        return { success: false, message: "Refusing to delete the filesystem root" };
+      }
+      const inner = `${isDirectory ? "rm -rf" : "rm -f"} ${shellQuote(remotePath)}`;
+      let lastError = "";
+
+      for (const cmd of escalationCommands(inner, remotePath)) {
+        const r = await adbs(serial, "shell", cmd);
+        const problem = firstLine(r.err || (/denied|failed|read-only/i.test(r.out) ? r.out : ""));
+        if (r.code === 0 && !problem) {
+          return { success: true, message: `Deleted ${basenamePosix(remotePath)}` };
+        }
+        if (!lastError) lastError = problem;
+      }
+
+      return { success: false, message: lastError || "Delete failed" };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle("firefly:fs-pull", async (_e, { serial, path: remotePath, isDirectory }: { serial: string; path: string; isDirectory: boolean }) => {
+    try {
+      const name = basenamePosix(remotePath);
+      let destination: string;
+
+      if (isDirectory) {
+        const picked = await dialog.showOpenDialog({
+          title: `Save "${name}" into folder`,
+          properties: ["openDirectory", "createDirectory"],
+        });
+        if (picked.canceled || !picked.filePaths[0]) return { success: false, canceled: true, message: "Canceled" };
+        destination = picked.filePaths[0];
+      } else {
+        const picked = await dialog.showSaveDialog({
+          title: "Download file",
+          defaultPath: path.join(app.getPath("downloads"), name),
+        });
+        if (picked.canceled || !picked.filePath) return { success: false, canceled: true, message: "Canceled" };
+        destination = picked.filePath;
+      }
+
+      const savedPath = isDirectory ? path.join(destination, name) : destination;
+
+      const direct = await adbs(serial, "pull", remotePath, destination);
+      if (direct.code === 0) {
+        return { success: true, message: `Saved to ${savedPath}`, filePath: savedPath };
+      }
+
+      // `adb pull` cannot reach app-private storage; stream the bytes out of a
+      // privileged shell instead. Directories would need archiving, so bail out.
+      if (isDirectory) {
+        return { success: false, message: firstLine(direct.err || direct.out) || "Download failed" };
+      }
+
+      let lastError = firstLine(direct.err || direct.out);
+      for (const cmd of escalationCommands(`cat ${shellQuote(remotePath)}`, remotePath).slice(1)) {
+        const r = await adbExecOutToFile(serial, cmd, destination);
+        if (r.code === 0 && !r.err) {
+          return { success: true, message: `Saved to ${savedPath}`, filePath: savedPath };
+        }
+        lastError = firstLine(r.err) || lastError;
+      }
+
+      await fs.rm(destination, { force: true }).catch(() => {});
+      return { success: false, message: lastError || "Download failed" };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle("firefly:fs-push", async (_e, { serial, remoteDir, localPaths }: { serial: string; remoteDir: string; localPaths?: string[] }) => {
+    try {
+      let sources = localPaths ?? [];
+      if (sources.length === 0) {
+        const picked = await dialog.showOpenDialog({
+          title: "Upload to device",
+          properties: ["openFile", "multiSelections"],
+        });
+        if (picked.canceled || picked.filePaths.length === 0) {
+          return { success: false, canceled: true, message: "Canceled" };
+        }
+        sources = picked.filePaths;
+      }
+
+      const failures: string[] = [];
+      for (const source of sources) {
+        const baseName = path.basename(source);
+        const remoteTarget = joinPosix(remoteDir, baseName);
+
+        const direct = await adbs(serial, "push", source, remoteTarget);
+        if (direct.code === 0) continue;
+
+        // Stage in a world-readable location, then copy into place with privileges.
+        const staged = `/data/local/tmp/firefly_${Date.now()}_${baseName}`;
+        const staging = await adbs(serial, "push", source, staged);
+        if (staging.code !== 0) {
+          failures.push(`${baseName}: ${firstLine(direct.err || direct.out)}`);
+          continue;
+        }
+
+        let error = firstLine(direct.err || direct.out);
+        let copied = false;
+        const copyInner = `cp ${shellQuote(staged)} ${shellQuote(remoteTarget)}`;
+        for (const cmd of escalationCommands(copyInner, remoteTarget).slice(1)) {
+          const r = await adbs(serial, "shell", cmd);
+          if (!isDenied(r)) { copied = true; break; }
+          error = firstLine(r.err || r.out) || error;
+        }
+
+        await adbs(serial, "shell", `rm -f ${shellQuote(staged)}`);
+        if (!copied) failures.push(`${baseName}: ${error}`);
+      }
+
+      if (failures.length > 0) {
+        return { success: false, message: failures.join("; ") };
+      }
+      return {
+        success: true,
+        message: sources.length === 1 ? `Uploaded ${path.basename(sources[0])}` : `Uploaded ${sources.length} files`,
+      };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
     }
   });
 
