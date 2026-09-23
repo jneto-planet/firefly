@@ -47,6 +47,8 @@ export default function App() {
   const [deviceIpAddress, setDeviceIpAddress] = React.useState<string | null>(null);
   const [deviceBatteryLevel, setDeviceBatteryLevel] = React.useState<number | null>(null);
   const [deviceIsCharging, setDeviceIsCharging] = React.useState<boolean>(false);
+  const [deviceWifiEnabled, setDeviceWifiEnabled] = React.useState<boolean | null>(null);
+  const [togglingWifi, setTogglingWifi] = React.useState<boolean>(false);
   const [deviceAndroidVersion, setDeviceAndroidVersion] = React.useState<string | null>(null);
 
   const [pollingEnabled, setPollingEnabled] = React.useState<boolean>(true);
@@ -343,6 +345,7 @@ export default function App() {
       setDeviceBatteryLevel(props.batteryLevel ?? null);
       setDeviceIsCharging(props.isCharging ?? false);
       setDeviceAndroidVersion(props.androidVersion ?? null);
+      setDeviceWifiEnabled(props.wifiEnabled ?? null);
     } catch {
       if (!isMounted.current) return;
       setDeviceIcon(null);
@@ -350,6 +353,7 @@ export default function App() {
       setDeviceBatteryLevel(null);
       setDeviceIsCharging(false);
       setDeviceAndroidVersion(null);
+      setDeviceWifiEnabled(null);
     }
   }
 
@@ -421,6 +425,29 @@ export default function App() {
       await window.firefly.downloadAndInstallUpdate();
     } catch (e) {
       console.error("Failed to install update:", e);
+    }
+  }
+
+  async function handleToggleWifi() {
+    const serial = currentSerial();
+    if (!serial || deviceWifiEnabled === null || togglingWifi) return;
+
+    const next = !deviceWifiEnabled;
+    setTogglingWifi(true);
+    try {
+      const result = await window.firefly.setWifiEnabled({ serial, enabled: next });
+      if (!isMounted.current) return;
+      if (result.success) {
+        setDeviceWifiEnabled(next);
+        // The radio takes a moment to settle, so confirm against the device.
+        setTimeout(() => updateDeviceIconOnly(serial), 2500);
+      } else {
+        setStatus(`Wi-Fi: ${result.message}`);
+      }
+    } catch (e) {
+      if (isMounted.current) setStatus(`Wi-Fi: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (isMounted.current) setTogglingWifi(false);
     }
   }
 
@@ -1473,6 +1500,9 @@ export default function App() {
           takingScreenshot={takingScreenshot}
           rebootDevice={() => setShowRebootConfirm(true)}
           rebooting={rebooting}
+          wifiEnabled={deviceWifiEnabled}
+          togglingWifi={togglingWifi}
+          toggleWifi={handleToggleWifi}
           openButterfly={handleOpenButterfly}
           openingButterfly={openingButterfly}
           butterflyConfigured={!!butterflyPath}

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("firefly", {
   pushAndReplace: (args: any) => ipcRenderer.invoke("firefly:push-replace", args),
   restartApp: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:restart", args),
   rebootDevice: (args: { serial: string }) => ipcRenderer.invoke("firefly:reboot-device", args),
+  setWifiEnabled: (args: { serial: string; enabled: boolean }) => ipcRenderer.invoke("firefly:set-wifi-enabled", args),
   pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => ipcRenderer.invoke("firefly:pull-xml-from-device", args),
   downloadConfigByTid: (args: { terminalId: string; saveDir: string }) => ipcRenderer.invoke("firefly:download-config-by-tid", args),
   clearTidFromDataStore: (args: { pkg: string; serial: string }) => ipcRenderer.invoke("firefly:clear-tid-from-datastore", args),

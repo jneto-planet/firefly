@@ -73,11 +73,13 @@ declare global {
         batteryLevel?: number | null;
         isCharging?: boolean;
         androidVersion?: string | null;
+        wifiEnabled?: boolean | null;
       }>;
       deleteOldCccFiles: (args: any) => Promise<any>;
       pushAndReplace: (args: any) => Promise<{ how: string }>;
       restartApp: (args: { pkg: string; serial: string }) => Promise<boolean>;
       rebootDevice: (args: { serial: string }) => Promise<boolean>;
+      setWifiEnabled: (args: { serial: string; enabled: boolean }) => Promise<{ success: boolean; message: string }>;
       pullXmlFromDevice: (args: { pkg: string; relTarget: string; serial: string; defaultSavePath: string }) => Promise<{ success: boolean; message: string; savePath?: string; filePath?: string; canceled?: boolean }>;
       downloadConfigByTid: (args: { terminalId: string; saveDir: string }) => Promise<{ success: boolean; filePath: string; fileName: string }>;
       clearTidFromDataStore: (args: { pkg: string; serial: string }) => Promise<{ success: boolean; message: string }>;

@@ -545,6 +545,15 @@ export function registerFireflyIpc() {
       }
     }
     
+    // Get Wi-Fi radio state
+    let wifiEnabled: boolean | null = null;
+    const rWifi = await adbs(serial, "shell", "settings get global wifi_on");
+    if (rWifi.code === 0) {
+      const value = rWifi.out.trim();
+      if (value === "1") wifiEnabled = true;
+      else if (value === "0") wifiEnabled = false;
+    }
+
     console.log(`[firefly] Device ${serial} - IP: ${ipAddress || 'not found'}, Battery: ${batteryLevel}%, Charging: ${isCharging}, Android: ${androidVersion}`);
     
     return { 
@@ -553,8 +562,21 @@ export function registerFireflyIpc() {
       ipAddress,
       batteryLevel,
       isCharging,
-      androidVersion
+      androidVersion,
+      wifiEnabled
     };
+  });
+
+  ipcMain.handle("firefly:set-wifi-enabled", async (_e, { serial, enabled }: { serial: string; enabled: boolean }) => {
+    try {
+      const r = await adbs(serial, "shell", `svc wifi ${enabled ? "enable" : "disable"}`);
+      if (r.code !== 0) {
+        return { success: false, message: firstLine(r.err || r.out) || "Failed to change Wi-Fi state" };
+      }
+      return { success: true, message: enabled ? "Wi-Fi enabled" : "Wi-Fi disabled" };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    }
   });
 
   // --- Push/replace flow (fully async, with timeouts) ---
